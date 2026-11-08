@@ -1,0 +1,10 @@
+{
+  "name": "@gmm/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure TypeScript core of Georgios' Map Maker: asset model, taxonomy, name parsing.",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

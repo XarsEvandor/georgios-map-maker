@@ -1,0 +1,15 @@
+{
+  "name": "@gmm/companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Companion app of Georgios' Map Maker: asset indexer, generator host, Dungeondraft bridge.",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@gmm/core": "*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "playwright-core": "^1.56.1",
+    "sharp": "^0.35.5",
+    "ws": "^8.22.1"
+  }
+}

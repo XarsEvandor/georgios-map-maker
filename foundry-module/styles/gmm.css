@@ -1,0 +1,46 @@
+.gmm-panel .window-content { padding: 0; }
+.gmm-panel .gmm-body { display: flex; flex-direction: column; height: 100%; gap: 8px; padding: 8px; box-sizing: border-box; }
+.gmm-panel .gmm-log { flex: 1 1 auto; overflow-y: auto; background: rgba(0, 0, 0, 0.25); border-radius: 4px; padding: 6px 10px; min-height: 160px; }
+.gmm-panel .gmm-log p { margin: 4px 0; line-height: 1.4; white-space: pre-wrap; }
+.gmm-panel .gmm-dm { color: #e8d9b0; }
+.gmm-panel .gmm-claude { color: #f3f0e8; }
+.gmm-panel .gmm-claude p { white-space: normal; }
+.gmm-panel .gmm-claude ul { margin: 4px 0 4px 18px; padding: 0; }
+.gmm-panel .gmm-claude li { margin: 2px 0; line-height: 1.4; }
+.gmm-panel .gmm-tool { color: #9aa7b3; font-size: 0.85em; }
+.gmm-panel .gmm-error { color: #ff8a7a; }
+.gmm-panel .gmm-hint { color: #b9b2a2; font-style: italic; }
+.gmm-panel .gmm-versions { display: flex; gap: 8px; overflow-x: auto; }
+.gmm-panel .gmm-version { margin: 0; flex: 1 1 0; min-width: 160px; cursor: pointer; border: 2px solid transparent; border-radius: 4px; padding: 2px; }
+.gmm-panel .gmm-version.picked { border-color: #e6b450; }
+.gmm-panel .gmm-version img, .gmm-panel .gmm-noimg { width: 100%; height: 200px; object-fit: contain; background: #222; display: block; }
+.gmm-panel .gmm-version figcaption { font-size: 0.8em; text-align: center; padding-top: 2px; }
+.gmm-panel .gmm-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.gmm-panel .gmm-actions button { flex: 1 1 auto; }
+.gmm-panel .gmm-input { display: flex; gap: 6px; }
+.gmm-panel .gmm-input textarea { flex: 1 1 auto; resize: vertical; }
+.gmm-open { margin: 4px; }
+
+/* Way back up from a place or a city (main.js renderWayUp). */
+#gmm-way-up {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  display: flex;
+  gap: 6px;
+}
+#gmm-way-up button {
+  width: auto;
+  padding: 4px 12px;
+  font-size: var(--font-size-14, 14px);
+  background: rgba(20, 16, 12, 0.85);
+  color: #f1e6cf;
+  border: 1px solid #8a6d3b;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#gmm-way-up button:hover { border-color: #e0b866; box-shadow: 0 0 6px #e0b86680; }
+#gmm-way-up button i { margin-right: 4px; }

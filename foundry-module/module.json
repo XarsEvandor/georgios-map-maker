@@ -1,0 +1,11 @@
+{
+  "id": "georgios-map-maker",
+  "title": "Georgios' Map Maker",
+  "description": "Builds battle maps from your description with Claude and your own 2-Minute Tabletop Dungeondraft assets. Needs the Georgios' Map Maker companion running on the GM's computer.",
+  "version": "0.1.0",
+  "authors": [{ "name": "Georgios" }],
+  "compatibility": { "minimum": "13", "verified": "14" },
+  "esmodules": ["scripts/main.js"],
+  "styles": ["styles/gmm.css"],
+  "languages": [{ "lang": "en", "name": "English", "path": "lang/en.json" }]
+}

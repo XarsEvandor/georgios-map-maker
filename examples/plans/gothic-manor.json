@@ -1,0 +1,27 @@
+{
+  "id": "ravenholt-manor",
+  "title": "Ravenholt Manor, the east wing",
+  "seed": 1313,
+  "genre": "gothic",
+  "size": { "w": 30, "h": 24 },
+  "mood": { "time": "night", "wear": "grimy", "lighting": "dark" },
+  "versions": { "count": 3 },
+  "levels": [
+    {
+      "id": "ground",
+      "zones": [
+        { "id": "ballroom", "type": "gothic.ballroom", "area": "large" },
+        { "id": "study", "type": "gothic.study", "area": "medium" },
+        { "id": "bedroom", "type": "gothic.bedroom", "area": "medium" }
+      ],
+      "connections": [
+        { "from": "ballroom", "to": "study" },
+        { "from": "ballroom", "to": "bedroom" },
+        { "from": "ballroom", "to": "outside", "side": "south" }
+      ]
+    }
+  ],
+  "directives": [
+    { "id": "d1", "pin": "coffin", "zone": "bedroom", "at": { "anchor": "center" }, "source": "dm-chat" }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": "dracula-entrance",
+  "title": "Castle Dracula: the entrance gallery",
+  "seed": 1897,
+  "genre": "gothic",
+  "size": { "w": 24, "h": 40 },
+  "mood": { "time": "night", "wear": "grimy", "lighting": "dark" },
+  "levels": [
+    {
+      "id": "ground",
+      "zones": [{ "id": "gallery", "type": "gothic.gallery", "area": "large" }],
+      "connections": [
+        { "id": "outer_gate", "from": "gallery", "to": "outside", "via": "gate", "width": 4, "state": "closed" },
+        { "id": "sealed_gate", "from": "gallery", "to": "beyond", "via": "gate", "width": 4, "state": "locked", "wall": "end" },
+        { "id": "medieval_wreck", "from": "gallery", "to": "beyond", "via": "gate", "width": 3, "broken": "medieval", "wall": "left", "along": 0.8 },
+        { "id": "scifi_wreck", "from": "gallery", "to": "beyond", "via": "gate", "width": 3, "broken": "scifi", "wall": "right", "along": 0.8 }
+      ]
+    }
+  ],
+  "directives": [
+    { "id": "red_carpet", "zone": "gallery", "modify": "runner", "color": "crimson", "condition": "frayed" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "forgotten-crypt",
+  "title": "A forgotten family crypt",
+  "seed": 1313,
+  "genre": "gothic",
+  "size": { "w": 24, "h": 20 },
+  "mood": { "time": "night", "wear": "ruined", "lighting": "dark" },
+  "versions": { "count": 2 },
+  "levels": [{ "id": "ground", "zones": [{ "id": "crypt", "type": "gothic.crypt", "area": "large" }, { "id": "vestry", "type": "gothic.vestry" }], "connections": [{ "from": "crypt", "to": "vestry" }, { "from": "crypt", "to": "outside" }] }]
+}

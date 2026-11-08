@@ -1,0 +1,26 @@
+{
+  "id": "ruined-chapel",
+  "title": "A ruined chapel in an overgrown graveyard",
+  "seed": 4242,
+  "genre": "gothic",
+  "size": { "w": 32, "h": 26 },
+  "mood": { "time": "night", "wear": "grimy", "lighting": "dark" },
+  "versions": { "count": 3 },
+  "levels": [
+    {
+      "id": "ground",
+      "zones": [
+        { "id": "nave", "type": "gothic.nave", "area": "large" },
+        { "id": "crypt", "type": "gothic.crypt", "area": "medium" },
+        { "id": "yard", "type": "gothic.graveyard" }
+      ],
+      "connections": [
+        { "from": "nave", "to": "crypt" },
+        { "from": "nave", "to": "outside", "side": "south" }
+      ]
+    }
+  ],
+  "directives": [
+    { "id": "d1", "free": "coffin", "zone": "nave", "at": { "anchor": "center", "offset": [0, 2] }, "source": "dm-chat" }
+  ]
+}

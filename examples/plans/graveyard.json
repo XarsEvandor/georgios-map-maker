@@ -1,0 +1,10 @@
+{
+  "id": "hollow-graveyard",
+  "title": "A hollow graveyard at midnight",
+  "seed": 77,
+  "genre": "gothic",
+  "size": { "w": 26, "h": 20 },
+  "mood": { "time": "night", "wear": "grimy" },
+  "versions": { "count": 2 },
+  "levels": [{ "id": "ground", "zones": [{ "id": "yard", "type": "gothic.graveyard" }] }]
+}

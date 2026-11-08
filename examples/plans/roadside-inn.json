@@ -1,0 +1,32 @@
+{
+  "id": "roadside-inn",
+  "title": "The Gilded Goose, a busy roadside inn",
+  "seed": 5150,
+  "genre": "medieval",
+  "size": { "w": 38, "h": 30 },
+  "mood": { "time": "dusk", "wear": "lived-in", "lighting": "dim" },
+  "versions": { "count": 3 },
+  "levels": [
+    {
+      "id": "ground",
+      "zones": [
+        { "id": "common", "type": "tavern.common_room", "area": "large" },
+        { "id": "kitchen", "type": "tavern.kitchen" },
+        { "id": "pantry", "type": "tavern.storage", "area": "small" },
+        { "id": "room1", "type": "tavern.guest_room" },
+        { "id": "room2", "type": "tavern.guest_room" },
+        { "id": "room3", "type": "tavern.guest_room", "area": "large" },
+        { "id": "cellar", "type": "tavern.cellar", "area": "small" }
+      ],
+      "connections": [
+        { "from": "common", "to": "kitchen" },
+        { "from": "kitchen", "to": "pantry" },
+        { "from": "common", "to": "room1" },
+        { "from": "common", "to": "room2" },
+        { "from": "common", "to": "room3" },
+        { "from": "kitchen", "to": "cellar" },
+        { "from": "common", "to": "outside" }
+      ]
+    }
+  ]
+}

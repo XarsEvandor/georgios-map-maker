@@ -1,0 +1,30 @@
+{
+  "id": "smugglers-tavern",
+  "title": "The Drowned Lantern, a smugglers' tavern by the docks",
+  "seed": 81723,
+  "genre": "medieval",
+  "size": { "w": 30, "h": 22 },
+  "mood": { "time": "night", "wear": "lived-in", "lighting": "dim" },
+  "versions": { "count": 3 },
+  "levels": [
+    {
+      "id": "ground",
+      "zones": [
+        { "id": "common", "type": "tavern.common_room", "area": "large" },
+        { "id": "kitchen", "type": "tavern.kitchen" },
+        { "id": "storage", "type": "tavern.storage" },
+        { "id": "guest", "type": "tavern.guest_room" }
+      ],
+      "connections": [
+        { "from": "common", "to": "kitchen" },
+        { "from": "kitchen", "to": "storage" },
+        { "from": "common", "to": "guest" },
+        { "from": "common", "to": "outside", "side": "south" }
+      ]
+    }
+  ],
+  "directives": [
+    { "id": "d1", "pin": "table", "zone": "common", "at": { "anchor": "center" }, "slots": { "chair": 0, "tankard": 0, "plate": 0, "candle": 0 }, "with": ["corpse"], "source": "dm-chat" },
+    { "id": "d2", "forbid": ["rug"], "zone": "kitchen", "source": "dm-chat" }
+  ]
+}

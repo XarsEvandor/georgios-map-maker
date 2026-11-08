@@ -1,0 +1,30 @@
+{
+  "id": "blackthorn-manor",
+  "title": "Blackthorn Manor, abandoned and haunted",
+  "seed": 666,
+  "genre": "gothic",
+  "size": { "w": 40, "h": 32 },
+  "mood": { "time": "night", "wear": "grimy", "lighting": "dark" },
+  "versions": { "count": 3 },
+  "levels": [
+    {
+      "id": "ground",
+      "zones": [
+        { "id": "hall", "type": "gothic.hall" },
+        { "id": "dining", "type": "gothic.dining" },
+        { "id": "ballroom", "type": "gothic.ballroom", "area": "medium" },
+        { "id": "study", "type": "gothic.study" },
+        { "id": "master", "type": "gothic.bedroom", "area": "large" },
+        { "id": "guest", "type": "gothic.bedroom", "area": "small" }
+      ],
+      "connections": [
+        { "from": "hall", "to": "outside" },
+        { "from": "hall", "to": "dining" },
+        { "from": "hall", "to": "ballroom" },
+        { "from": "hall", "to": "study" },
+        { "from": "ballroom", "to": "master" },
+        { "from": "study", "to": "guest" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+# Packs to vision-tag for medieval and gothic maps (one name per line, exact pack name).
+# Interiors and furniture
+2MT Furniture Map Assets
+2MT Furniture Map Assets Plus
+2MT Castle Furniture
+2MT Mansion Furniture
+2MT Broken Furniture Assets
+2MT Broken Furniture Assets Plus
+2MT Food Assets
+2MT Food Assets Plus
+2MT Twilight Tavern Plus
+2MT 2-Minute Tavern Plus
+2MT Typical Tavern
+2MT Dwarven Tavern Plus
+2MT Medieval Building Map Assets
+2M Basic Building Assets
+2MT Buildings Pack
+2MT Alchemy Shop Plus
+2MT Metalsmith's Workshop Plus
+2MT Owl's Library Plus
+2MT Wizarding School Library Plus
+2MT Bards Workshop Plus
+2M Spell Scroll Store Pack
+2MT Round Table Plus
+2MT Festive Lodge Plus
+2MT Secluded Villa Plus
+2MT Royal Bathhouse Plus
+2M Sinister Cabin Pack
+2MT Creepy Cabin Plus
+2MT Mercantile Tokens
+# Detail layers
+2MT Grime and Shine Assets
+2MT Blood and Bodies Map Assets
+2MT Blood and Bodies Map Assets Plus
+2MT Battle Damage Assets
+2MT Battle Damage Assets Plus
+# Gothic
+2MT Moonlit Cathedral Plus
+2MT Church of Bones Plus
+2MT Cathedral Ruins Plus
+2MT Wedding Chapel Plus
+2M Haunted Graveyard
+2M Infested Crypt
+2MT Crystal Crypts Plus
+2MT Mental Asylum Plus
+2MT Victorian Ballroom Plus
+2M Cultist Lair Pack
+2M Forgotten Monastery
+2M Forgotten Monastery Pack
+2MT Statue Map Assets
+2MT Shrine Essentials
+2MT Sinister Woodland Plus
+2M Docks of the Dead Pack
+# Dungeon
+2MT Dungeon Wall and Floor Assets
+2MT Dungeon Wall and Floor Assets Plus
+2M Dungeon Jail Pack
+2MT Modular Jail
+2MT Dungeon Room Builder
+# Exteriors
+2MT Grass & Road Assets 2
+2MT Grass & Road Assets 2 Plus
+2M Grass and Road Assets
+2M Forest Floor Assets
+2M Forest Floor Pack
+2MT Fallen Tree Map Assets
+2MT Fallen Tree Map Assets Plus
+2MT Roadside Forest Tokens
+2MT Carts Carriages and Wagons
+2MT Farmer's Field Plus
+2M Simple Stable
+2M Simple Stable Pack
+2M Town Center Pack
+2M Medieval City Center
+2MT Marketplace Map Assets
+2M Edge of the Woods PacK
+2MT Witch's Herbgarden Plus
+2M Forest Camp
+2MT Castle Walls

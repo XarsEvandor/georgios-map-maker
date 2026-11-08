@@ -1,0 +1,24 @@
+{
+  "name": "georgios-map-maker",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "index": "tsx packages/companion/src/cli/build-index.ts",
+    "sheet": "tsx packages/companion/src/cli/group-sheet.ts",
+    "gen": "tsx packages/companion/src/cli/generate.ts",
+    "render": "tsx packages/companion/src/cli/render.ts",
+    "serve": "tsx packages/companion/src/cli/serve.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

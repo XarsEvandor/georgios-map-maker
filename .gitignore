@@ -1,0 +1,9 @@
+node_modules/
+dist/
+# Generated output. It lists 2-Minute Tabletop asset names, so it never goes to a public repository.
+data/
+__pycache__/
+*.log
+
+# Local working notes
+TASK.md

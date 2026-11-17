@@ -7,6 +7,7 @@
 
 import { cityLink, eventText, majorEvents, namer, peoplesOf, realmEvents, type AgedBurg, type AgedWorld, type AzWorld } from "@gmm/core";
 import { notableTowns, townPage, type Prose } from "./write";
+import { cultureText, faithText, type WorldLore } from "./lore";
 
 export interface BundleJournal {
   /** Stable key, so a re-import replaces instead of duplicating. */
@@ -48,13 +49,26 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const paras = (text: string) => text.split(/\n\s*\n/).map((p) => `<p>${esc(p.trim())}</p>`).join("");
 const list = (items: string[]) => (items.length ? `<ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : "");
 
-export function buildBundle(az: AzWorld, w: AgedWorld, prose: Prose | undefined, o: { id: string; title: string; map: { width: number; height: number; scale: number } }): WorldBundle {
+export function buildBundle(az: AzWorld, w: AgedWorld, prose: Prose | undefined, o: { id: string; title: string; map: { width: number; height: number; scale: number }; lore?: WorldLore }): WorldBundle {
   const n = namer(w);
   const cells = az.cells.map((c) => c.p);
   const line = (e: Parameters<typeof eventText>[0]) => eventText(e, n, cells);
   const S = o.map.scale;
-  const culture = (i: number) => az.cultures.find((c) => c.i === i)?.name ?? "mixed";
+  const lore = o.lore;
+  const cultureBare = (i: number) => az.cultures.find((c) => c.i === i)?.name ?? "mixed";
+  const culture = (i: number) => cultureText(lore, cultureBare(i));
   const faith = (i: number) => w.religions.find((r) => r.i === i)?.name ?? "none";
+  // The DM's lore as pages: the Lord and the peoples (players can read these, like every page here).
+  const lorePages = lore
+    ? [{
+      name: "The Lord and the peoples",
+      html: (lore.lord ? `<h3>The Lord</h3>${paras(lore.lord)}` : "")
+        + (lore.era ? `<p>${esc(`Years are counted ${lore.era.short}, ${lore.era.name}, from ${lore.era.from}.`)}</p>` : "")
+        + (lore.world?.length ? list(lore.world) : "")
+        + `<h3>Peoples</h3>` + (lore.peoples ? `<p>${esc(lore.peoples)}</p>` : "")
+        + list(az.cultures.filter((c) => c.i > 0).map((c) => cultureText(lore, c.name)).concat(lore.humans ? [lore.humans] : [])),
+    }]
+    : [];
   const realmName = (id: number) => w.states.find((s) => s.id === id)?.fullName ?? "no realm";
   const journals: BundleJournal[] = [];
   const pins: BundlePin[] = [];
@@ -65,11 +79,12 @@ export function buildBundle(az: AzWorld, w: AgedWorld, prose: Prose | undefined,
     key: "world", name: o.title, folder: "",
     pages: [
       { name: "Overview", html: paras(prose?.overview ?? `${w.name} in ${w.year} ${w.eraShort}.`) + `<h3>Realms</h3>` + list(w.states.filter((s) => s.alive).sort((a, b) => b.cells - a.cells).map((s) => `${s.fullName}, ruled from ${w.burgs.find((b) => b.id === s.capital)?.name ?? "nowhere"}`)) },
+      ...lorePages,
       ...(prose?.ages ?? []).map((a) => ({ name: `${a.from}-${a.to}: ${a.title}`, html: paras(a.text) + `<h3>Events</h3>` + list(majorEvents(w, a.from, a.to).map(line)) })),
       {
         name: "Faiths", html: list([...new Set(w.cells.religion.filter((r, i) => w.cells.state[i]))].map((r) => {
           const rel = w.religions.find((x) => x.i === r);
-          return rel ? `${rel.name}${rel.parent !== undefined ? `, split from ${faith(rel.parent)} in ${rel.founded}` : ""}` : "";
+          return rel ? `${faithText(lore, rel.name)}${rel.parent !== undefined ? `; split from ${faith(rel.parent)} in ${rel.founded}` : ""}` : "";
         }).filter(Boolean)),
       },
       { name: "Fallen realms", html: list(w.states.filter((s) => !s.alive).map((s) => `${n.realm(s.id, s.founded)} (${s.founded}-${s.ended}): ${prose?.fallen[s.id] ?? ""}`.trim())) },
@@ -86,8 +101,8 @@ export function buildBundle(az: AzWorld, w: AgedWorld, prose: Prose | undefined,
       pages: [
         {
           name: "Today", html: paras(r?.today ?? "") + list(s.invader
-            ? [`Seat: ${cap?.name ?? "none"}`, `People of the land: ${peoplesOf(w, s).map((p) => culture(p.culture)).join(", ")}`, `Came: ${s.founded}`, `Towns: ${towns.length}`]
-            : [`Capital: ${cap?.name ?? "none"}`, `People: ${culture(s.culture)}`, `Faith: ${faith(s.religion)}`, `Founded: ${s.founded}${s.oldName ? ` (as ${s.oldName})` : ""}`, `Towns: ${towns.length}`]),
+            ? [`Seat: ${cap?.name ?? "none"}`, `People of the land: ${peoplesOf(w, s).map((p) => cultureBare(p.culture)).join(", ")}`, ...(lore?.invader?.seen ? [`Seen in its ranks: ${lore.invader.seen}`] : []), `Came: ${s.founded}`, `Towns: ${towns.length}`]
+            : [...(lore?.rulers?.[s.id] ? [`Ruler: ${lore.rulers[s.id]!.ruler}`] : []), `Capital: ${cap?.name ?? "none"}`, `People: ${culture(s.culture)}`, `Faith: ${faithText(lore, faith(s.religion))}`, `Founded: ${s.founded}${s.oldName ? ` (as ${s.oldName})` : ""}`, `Towns: ${towns.length}`]),
         },
         { name: "History", html: paras(r?.history ?? "") + `<h3>Chronicle</h3>` + list(realmEvents(w, s).map(line)) },
         { name: "Towns", html: list(towns.map((b) => `${b.name}, ${Math.round(b.population * 1000).toLocaleString("en")} people${b.walls ? ", walled" : ""}${b.port ? ", port" : ""}`)) },

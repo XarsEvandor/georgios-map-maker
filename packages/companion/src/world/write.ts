@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eventText, majorEvents, namer, peoplesOf, realmEvents, townEvents, type AgedBurg, type AgedState, type AgedWorld, type AzWorld } from "@gmm/core";
 import { findClaude } from "../llm/claude-cli";
+import { cultureText, faithText, loreContext, type WorldLore } from "./lore";
 
 export interface Prose {
   overview: string;
@@ -73,7 +74,8 @@ export function notableTowns(w: AgedWorld): AgedBurg[] {
   return [...new Set([...top, ...caps])];
 }
 
-export async function writeProse(az: AzWorld, w: AgedWorld, opts: { concurrency?: number; onProgress?: (msg: string) => void; prior?: Partial<Prose> } = {}): Promise<Prose> {
+export async function writeProse(az: AzWorld, w: AgedWorld, opts: { concurrency?: number; onProgress?: (msg: string) => void; prior?: Partial<Prose>; lore?: WorldLore } = {}): Promise<Prose> {
+  const lore = opts.lore;
   const n = namer(w);
   const cells = az.cells.map((c) => c.p);
   const line = (e: Parameters<typeof eventText>[0]) => eventText(e, n, cells);
@@ -88,10 +90,12 @@ export async function writeProse(az: AzWorld, w: AgedWorld, opts: { concurrency?
     const towns = took.flatMap((e) => e.burgs).map((b) => n.town(b, w.year));
     return `
 ${s.founded === w.year ? `A few months ago, in ${s.founded},` : `In ${s.founded},`} the ${s.name} invaded and took the land round ${towns.join(", ") || "a few villages"} from ${took.map((e) => n.realm(e.states[1]!, e.year)).join(" and ")}. Its seat is ${w.burgs.find((b) => b.id === s.capital)?.name ?? "unknown"}.
-Nothing more is known of the ${s.name}. Never invent where it came from or what it is, and never describe its people, leaders, weapons, machines, beliefs or aims: the DM decides those. Write only what the people of ${w.name} can know: that it came, what it took, and how they and their neighbours meet it.`;
+${lore?.invader?.seen
+      ? `Its people have seen ${lore.invader.seen}. Nobody knows ${lore.invader.unknown ?? "where it came from, who leads it or what it wants"}: never invent those. Write only what the people of ${w.name} can know: that it came, what it took, what its forces look like, and how they and their neighbours meet it.`
+      : `Nothing more is known of the ${s.name}. Never invent where it came from or what it is, and never describe its people, leaders, weapons, machines, beliefs or aims: the DM decides those. Write only what the people of ${w.name} can know: that it came, what it took, and how they and their neighbours meet it.`}`;
   }).join("");
   const world = `The world is ${w.name}. The years run from ${w.startYear} to ${w.year} ${w.eraShort}. Constant wars kept it medieval: no gunpowder, no printing, castles and pikes.
-Its peoples: ${az.cultures.filter((c) => c.i > 0).map((c) => c.name).join(", ")}.${strangers}`;
+${loreContext(lore, az.cultures.filter((c) => c.i > 0).map((c) => c.name))}${strangers}`;
 
   const tasks: Array<() => Promise<void>> = [];
   // Ages of 125 years; a repeated title is written again.
@@ -130,13 +134,14 @@ Reply with JSON only: {"title": "...", "text": "paragraphs separated by blank li
       const r = await ask<{ history: string; today: string }>(`${world}
 Write two texts about the realm ${s.fullName} for a Dungeon Master.
 Facts: ${s.invader ? `invaders who came in ${s.founded}; see above for all that is known of them` : s.origin === "old" ? `one of the oldest realms, known in ${w.startYear} as ${s.oldName}` : s.origin === "rebellion" ? `born in ${s.founded} when it broke away from ${n.realm(s.parent ?? -1, s.founded)}` : `formed in ${s.founded}`}.
-${s.invader ? `Seat: ${cap?.name ?? "none"}. The peoples of the land it holds (a mix; do not call its towns all one people): ${peoplesOf(w, s).map((p) => `${cultureName(p.culture)} (${p.cells} of its ${s.cells} parts of land, about ${Math.round(p.townsfolk)} thousand in its towns)`).join(", ")}.` : `Capital: ${cap?.name ?? "none"}. People: ${cultureName(s.culture)}. Faith: ${n.religion(s.religion)}.`} Holds about ${share}% of the settled land.
+${s.invader ? `Seat: ${cap?.name ?? "none"}. The peoples of the land it holds (a mix; do not call its towns all one people): ${peoplesOf(w, s).map((p) => `${cultureName(p.culture)} (${p.cells} of its ${s.cells} parts of land, about ${Math.round(p.townsfolk)} thousand in its towns)`).join(", ")}.` : `Capital: ${cap?.name ?? "none"}. People: ${cultureText(lore, cultureName(s.culture))}. Faith: ${faithText(lore, n.religion(s.religion))}.`} Holds about ${share}% of the settled land.
+${lore?.rulers?.[s.id] ? `Ruler: ${lore.rulers[s.id]!.ruler}; use exactly this name and give no other ruler.${lore.rulers[s.id]!.archmage ? ` Its archmage: ${lore.rulers[s.id]!.archmage}.` : ""}` : ""}
 Chief towns: ${towns.join(", ")}.
 Events:
 ${evs.map(line).join("\n")}
 ${s.invader ? `1. "history": 1 or 2 paragraphs, 100 to 160 words: the invasion as the people of the land lived it.
 2. "today": one paragraph, 70 to 110 words: how the land it holds stands in ${w.year} and how its neighbours meet it. Do not name its leaders. Give the DM one hook.` : `1. "history": 2 or 3 paragraphs, 180 to 260 words: how it came to be what it is.
-2. "today": one paragraph, 70 to 110 words: how it stands in ${w.year}, who rules (you may name the ruler), what it wants, whom it fears. Give the DM one hook.`}
+2. "today": one paragraph, 70 to 110 words: how it stands in ${w.year}, who rules (${lore?.rulers?.[s.id] ? "the ruler named above" : "you may name the ruler"}), what it wants, whom it fears. Give the DM one hook.`}
 ${STYLE}
 Reply with JSON only: {"history": "...", "today": "..."}`);
       prose.realms[s.id] = r;
@@ -173,7 +178,7 @@ Reply with JSON only, keyed by the number: {"12": "...", ...}`);
   ${evs.join("\n  ") || "No great events."}`;
       });
       const r = await ask<Record<string, string>>(`${world}
-For each town below, write 70 to 110 words for a Dungeon Master: what it is like in ${w.year}, what its past left behind, and one rumour or hook.
+For each town below, write 70 to 110 words for a Dungeon Master: what it is like in ${w.year}, what its past left behind, and one rumour or hook.${lore ? " Show its folk as the kinds of creature its culture holds." : ""}
 ${facts.join("\n")}
 ${STYLE}
 Reply with JSON only, keyed by the number: {"12": "...", ...}`);
@@ -185,7 +190,7 @@ Reply with JSON only, keyed by the number: {"12": "...", ...}`);
   prose.ages.sort((a, b) => a.from - b.from);
   if (!prose.overview) {
     prose.overview = (await ask<{ text: string }>(`${world}
-Write an overview of ${w.name} in ${w.year} ${w.eraShort} for a Dungeon Master, 180 to 250 words: the realms, the balance of power, the mood of the age.
+Write an overview of ${w.name} in ${w.year} ${w.eraShort} for a Dungeon Master, 180 to 250 words: the realms, the balance of power, the mood of the age.${lore?.lord ? " Open with the Lord: his rule, his withdrawal, and how the peoples regard him now." : ""}
 Realms: ${alive.map((s) => `${s.fullName} (${cultureName(s.culture)}, capital ${w.burgs.find((b) => b.id === s.capital)?.name ?? "none"})`).join("; ")}.
 The ages: ${prose.ages.map((a) => `${a.from}-${a.to} "${a.title}"`).join("; ")}.
 ${STYLE}
@@ -208,7 +213,7 @@ export function townPage(az: AzWorld, w: AgedWorld, b: AgedBurg): string {
   return `${intro}${past}${evs.length ? `\n\n${evs.map((e) => eventText(e, n, cells)).join("\n")}` : ""}`;
 }
 
-export function realmFacts(az: AzWorld, w: AgedWorld, s: AgedState): string {
+export function realmFacts(az: AzWorld, w: AgedWorld, s: AgedState, lore?: WorldLore): string {
   const cap = w.burgs.find((b) => b.id === s.capital);
-  return `Capital: ${cap?.name ?? "none"}. People: ${az.cultures.find((c) => c.i === s.culture)?.name ?? "mixed"}. Faith: ${w.religions.find((r) => r.i === s.religion)?.name ?? "none"}.`;
+  return `Capital: ${cap?.name ?? "none"}. People: ${cultureText(lore, az.cultures.find((c) => c.i === s.culture)?.name ?? "mixed")}. Faith: ${faithText(lore, w.religions.find((r) => r.i === s.religion)?.name ?? "none")}.`;
 }

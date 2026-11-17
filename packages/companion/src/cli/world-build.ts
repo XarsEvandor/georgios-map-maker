@@ -17,6 +17,7 @@ import { ageWorld, applySteers, parseAzgaar, type AgedWorld, type SteerRecord, t
 import { writeProse, type Prose } from "../world/write";
 import { renderWorld } from "../world/render";
 import { buildBundle } from "../world/bundle";
+import { loadLore } from "../world/lore";
 import { loadIndex } from "../assets/load";
 import { AssetSource } from "../assets/source";
 
@@ -64,7 +65,7 @@ if (has("age") || !existsSync(join(dir, "aged.json"))) {
 let prose: Prose | undefined;
 if (has("prose")) {
   const prior = existsSync(join(dir, "prose.json")) && !stages.has("all") ? JSON.parse(await readFile(join(dir, "prose.json"), "utf8")) : undefined;
-  prose = await writeProse(az, aged, { prior, onProgress: log });
+  prose = await writeProse(az, aged, { prior, onProgress: log, lore: await loadLore(dir) });
   await writeFile(join(dir, "prose.json"), JSON.stringify(prose, null, 1));
   log("prose written");
 } else if (existsSync(join(dir, "prose.json"))) prose = JSON.parse(await readFile(join(dir, "prose.json"), "utf8"));
@@ -79,7 +80,7 @@ if (has("render")) {
 
 if (has("bundle")) {
   const map = JSON.parse(await readFile(join(dir, "map.json"), "utf8"));
-  const bundle = buildBundle(az, aged, prose, { id: values.id, title: values.title ?? `${aged.name}, ${aged.year} ${aged.eraShort}`, map });
+  const bundle = buildBundle(az, aged, prose, { id: values.id, title: values.title ?? `${aged.name}, ${aged.year} ${aged.eraShort}`, map, lore: await loadLore(dir) });
   await writeFile(join(dir, "bundle.json"), JSON.stringify(bundle));
   const target = join(values.foundry!, "georgios-map-maker", "worlds", values.id);
   await mkdir(target, { recursive: true });

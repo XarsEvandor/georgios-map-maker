@@ -23,14 +23,13 @@
 
 /* Way back up from a place or a city (main.js renderWayUp). */
 #gmm-way-up {
-  position: fixed;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 70;
   display: flex;
   gap: 6px;
+  pointer-events: auto;
 }
+/* Under the clock in the top bar; on its own (no clock yet) fixed at the top. */
+#ui-top > #gmm-way-up { align-self: center; margin-top: 6px; }
+body > #gmm-way-up { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 70; }
 #gmm-way-up button {
   width: auto;
   padding: 4px 12px;
@@ -44,3 +43,95 @@
 }
 #gmm-way-up button:hover { border-color: #e0b866; box-shadow: 0 0 6px #e0b86680; }
 #gmm-way-up button i { margin-right: 4px; }
+
+/* The clock (clock.js): the day's or the night's eight segments, at the top for everyone. */
+#gmm-clock {
+  align-self: center;
+  margin-top: 8px;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  background: rgba(20, 16, 12, 0.85);
+  color: #f1e6cf;
+  border: 1px solid #8a6d3b;
+  border-radius: 999px;
+  font-size: var(--font-size-13, 13px);
+  --gmm-clock-hue: #e0b866;
+}
+body > #gmm-clock { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 70; }
+#gmm-clock.night { --gmm-clock-hue: #9fb6d9; border-color: #4f5f7a; }
+#gmm-clock .gmm-clock-face { display: flex; align-items: center; gap: 8px; }
+#gmm-clock .gmm-clock-phase { color: var(--gmm-clock-hue); width: 14px; text-align: center; margin: 0; }
+/* The sun or moon folds and unfolds the bar. */
+#gmm-clock .gmm-clock-fold {
+  width: 22px;
+  height: 26px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+#gmm-clock .gmm-clock-fold:hover .gmm-clock-phase { text-shadow: 0 0 6px var(--gmm-clock-hue); }
+/* Moved by the player (clock.js place): fixed where they dropped it. */
+#gmm-clock { cursor: grab; user-select: none; }
+#gmm-clock.dragging { cursor: grabbing; }
+#gmm-clock.moved { position: fixed; z-index: 70; margin: 0; transform: none; }
+/* Folded: the sun or moon only (and the GM's step button). */
+#gmm-clock.min { padding: 4px 6px; gap: 4px; }
+#gmm-clock.min .gmm-clock-pips, #gmm-clock.min .gmm-clock-name, #gmm-clock.min .gmm-clock-date { display: none; }
+#gmm-clock .gmm-clock-pips { display: flex; gap: 3px; }
+#gmm-clock .gmm-clock-pip {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  border: 1px solid var(--gmm-clock-hue);
+  opacity: 0.8;
+}
+#gmm-clock .gmm-clock-pip.past { background: var(--gmm-clock-hue); opacity: 0.3; }
+#gmm-clock .gmm-clock-pip.now { background: var(--gmm-clock-hue); opacity: 1; box-shadow: 0 0 6px var(--gmm-clock-hue); }
+#gmm-clock .gmm-clock-name { min-width: 92px; white-space: nowrap; }
+#gmm-clock .gmm-clock-step {
+  width: 26px;
+  height: 26px;
+  line-height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid #8a6d3b;
+  background: rgba(0, 0, 0, 0.35);
+  color: #f1e6cf;
+  cursor: pointer;
+}
+#gmm-clock .gmm-clock-step:hover { border-color: var(--gmm-clock-hue); box-shadow: 0 0 6px var(--gmm-clock-hue); }
+#gmm-clock .gmm-clock-step i { margin: 0; }
+/* The date and the weather (players: text; the GM: a button that opens the time dialog). */
+#gmm-clock .gmm-clock-date {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  margin: 0;
+  border: none;
+  border-left: 1px solid rgba(138, 109, 59, 0.6);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  width: auto;
+}
+#gmm-clock button.gmm-clock-date { cursor: pointer; }
+#gmm-clock button.gmm-clock-date:hover .gmm-clock-day { text-shadow: 0 0 6px var(--gmm-clock-hue); }
+#gmm-clock .gmm-clock-weather { color: var(--gmm-clock-hue); margin: 0; }
+/* The GM's time dialog. */
+.gmm-time-dialog .gmm-time fieldset { margin: 0 0 8px; }
+.gmm-time-dialog .gmm-time-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.gmm-time-dialog .gmm-time-row input[type="number"] { width: 72px; flex: 0 0 auto; }
+.gmm-time-dialog .gmm-time-row select { flex: 1 1 auto; }
+.gmm-time-dialog .gmm-time-row button { flex: 0 0 auto; width: auto; white-space: nowrap; }
+.gmm-time-dialog .hint { margin: 4px 0 0; font-size: var(--font-size-12, 12px); opacity: 0.8; }

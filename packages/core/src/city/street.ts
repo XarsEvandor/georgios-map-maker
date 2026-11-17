@@ -10,9 +10,9 @@ import { PX_PER_SQUARE as S, type AssetRecord } from "../assets/model";
 import { DDMapBuilder } from "../ddmap/builder";
 import type { Vec2 } from "../ddmap/godot";
 import type { Catalog } from "../gen/catalog";
-import { LIGHTS, makeCtx, Grid, Cell, place, pick, pickWeighted, rectAt, aabb, type Ctx, type Placed, LAYER } from "../gen/dress";
+import { LIGHTS, makeCtx, Grid, Cell, place, pick, pickWeighted, rectAt, aabb, frontSize, rotationFor, type Ctx, type Placed, LAYER } from "../gen/dress";
 import type { ElementInfo, GeneratedMap, GeneratedVersion } from "../gen/generate";
-import type { Layout } from "../gen/layout";
+import type { Layout, Shelter } from "../gen/layout";
 import type { ScenePlan } from "../gen/plan";
 import { Rng } from "../gen/rng";
 import { buildStyles, type Style, type Wear } from "../gen/style";
@@ -21,7 +21,7 @@ import { faceLight, hipRoof, type RoofFace } from "./roof";
 import { noise2, smoothstep } from "../gen/noise";
 import { houseArtFrom, placeHouses } from "./houses";
 import { cityPlaces } from "./places";
-import type { Trade } from "./shops";
+import { TRADES, type Trade } from "./shops";
 import { furnishBuilding, type BuildingKind } from "./interiors";
 import { RECIPE_BY_TYPE, rolesOfRecipe } from "../gen/recipes";
 
@@ -100,6 +100,11 @@ export interface StreetOptions {
 /** Room types whose furniture sets the street map's indoor style. */
 const INDOOR_ROOMS = ["house.home", "house.living", "house.bedroom", "tavern.common_room"];
 
+/** Lights by the street door of the great buildings (one each side) and the public ones (one); homes, warehouses and secret places have none. */
+const DOOR_LAMPS: Partial<Record<string, number>> = { keep: 2, castle: 2, mansion: 2, garrison: 2, gatehouse: 2, church: 2, chapel: 1, parish: 1, tavern: 1, inn: 1, guildhall: 1, stable: 1, wizard: 1 };
+/** Street lights are plain flames: no crystal, skulls, coloured fire or broken pieces. */
+const ODD_LIGHT = /crystal|skull|green|blue|rose|broken|unlit|snuffed|toppled|neon|cyber|platform/i;
+
 /** The furniture style every building on a street map shares (one pack family, one wood tone). */
 function indoorStyle(cat: Catalog, plan: ScenePlan, st: Style, wall: AssetRecord | undefined): Style | undefined {
   const roles = [...new Set(INDOOR_ROOMS.flatMap((t) => rolesOfRecipe(RECIPE_BY_TYPE.get(t)!)))];
@@ -155,6 +160,24 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
   const grid = new Grid(w, h);
   const ctx: Ctx = makeCtx({ plan, layout, cat, style: st, styles, locked: [] }, grid, `street:${st.id}`);
   const zoneId = layout.zones[0]!.id;
+
+  // Lights for the night: the style's own lit piece when it has one, else a plain lit 2MT piece; one look per map.
+  const lrng = new Rng(`${plan.seed}:${st.id}:lights`);
+  const lightPieces = new Map<string, AssetRecord | undefined>();
+  const streetLight = (role: string, maxSide: number, wall = false): AssetRecord | undefined => {
+    const key = `${role}:${maxSide}:${wall}`;
+    if (lightPieces.has(key)) return lightPieces.get(key);
+    const ok = (a: AssetRecord) => !!a.tag?.lit && !ODD_LIGHT.test(a.name) && Math.max(...(a.footprint ?? [1, 1])) <= maxSide && (a.tag?.placement === "wallmount") === wall;
+    const own = pick(ctx, zoneId, role, { lit: true, maxSide, ...(wall ? { placement: ["wallmount"] } : {}) }, lrng);
+    const any = cat.ofRole(role).filter(ok);
+    const a = own && ok(own) ? own : any.length ? lrng.pick(any) : undefined;
+    lightPieces.set(key, a);
+    return a;
+  };
+  const doorLamps: Array<{ at: Vec; out: Vec; n: number }> = [];
+  // Every house's wall line and street door, for the street lights.
+  const houseWalls: Vec[][] = [];
+  const doorSpots: Vec[] = [];
 
   const wall = city.walls.find((x) => city.buildings.filter((bb) => inside(centroid(bb), x.ring)).length > city.buildings.length / 3);
   // An open town (no wall) is a village: earth and grass, not cobbles.
@@ -326,6 +349,18 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
       elements[b.addPattern({ points: r.map(px), texture: plank.res, rotation: Number((ang + Math.PI / 2).toFixed(5)), layer: 200 })] = { kind: "floor", key: `pier#${i}`, zone: zoneId, asset: plank.id };
       const edge = b.addWall({ points: r.map(px), loop: true, texture: pierEdge?.res });
       elements[edge.id] = { kind: "wall", key: `pier#${i}/edge` };
+      // Lanterns along the deck, every seven squares, on alternate sides.
+      const lantern = streetLight("lantern", 0.8);
+      const a0 = sq(pts[j] as Pt), a1 = sq(pts[j + 1] as Pt);
+      const len = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]);
+      const half = (pl.width * k) / 2 - 0.45;
+      if (!lantern || len < 2 || half < 0.2) continue;
+      const u: Vec = [(a1[0] - a0[0]) / len, (a1[1] - a0[1]) / len], v: Vec = [-u[1], u[0]];
+      for (let t = 2, m = 0; t < len - 1; t += 7, m++) {
+        const sd = (i + m) % 2 ? 1 : -1;
+        const at: Vec = [a0[0] + u[0] * t + v[0] * half * sd, a0[1] + u[1] * t + v[1] * half * sd];
+        if (at[0] > 0.5 && at[1] > 0.5 && at[0] < w - 0.5 && at[1] < h - 0.5) place(ctx, { asset: lantern, role: "lantern", at, rot: 0, layer: LAYER.furniture, zone: zoneId, feature: "pier_lights", occupy: "force", light: LIGHTS.lantern });
+      }
     }
   }
 
@@ -412,9 +447,12 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     }
     return out;
   };
+  /** Buildings shown from inside: the weather stays out of them (roofed buildings get it on the roof). */
+  const sheltered: Shelter[] = [];
   /** Floor, inner walls with doors and furniture for one building (`shape` is its wall line). */
   const furnish = (key: string, floorRing: Vec[], shape: Vec[], doorAt: Vec | undefined, kind: BuildingKind, trade?: Trade) => {
     if (!indoor) return;
+    sheltered.push({ points: shape.map(([x, y]) => [x, y] as [number, number]) });
     const it = furnishBuilding({ key, shape, door: doorAt, kind, trade, plan, cat, style: indoor, zone: zoneId });
     const floor = use(indoor.floors[it.floor] ?? indoor.floors.wood ?? indoor.floors.stone);
     if (floor) elements[b.addPattern({ points: floorRing.map(px), texture: floor.res })] = { kind: "floor", key: `floor:${key}`, zone: zoneId, asset: floor.id };
@@ -493,9 +531,15 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
         doors: [...(door && inside0 ? [{ at: px(doorAt), texture: door.res, width: 1 }] : []), ...wins.map((p) => ({ at: px(p), texture: windowTex!.res, width: 1, closed: true }))],
       });
       elements[res.id] = { kind: "wall", key: `house#a${n}` };
+      houseWalls.push(inner);
+      if (door && inside0) doorSpots.push(doorAt);
       const nDoor = door && inside0 ? 1 : 0;
       res.doors.forEach((nid, k) => (elements[nid] = k < nDoor ? { kind: "door", key: `door:house#a${n}`, zone: zoneId, state: "closed" } : { kind: "window", key: `window:house#a${n}#${k - nDoor}`, zone: zoneId }));
       furnish(`house#a${n}`, shape, inner, mids.length ? doorAt : undefined, kindOf(hs.art.role, hs.landmark), shopOf.get(n));
+      const trade = shopOf.get(n);
+      const lamps = hs.landmark ? (DOOR_LAMPS[hs.landmark] ?? 0) : trade && !TRADES[trade].secret ? 1 : 0;
+      const doorWall = lamps && door && inside0 ? walls.find((e) => e.p === doorAt) : undefined;
+      if (doorWall) doorLamps.push({ at: doorAt, out: doorWall.out, n: lamps });
       const bb = bboxOf(shape);
       for (let yy = Math.floor(bb.y); yy < bb.y + bb.h; yy += 0.25) for (let xx = Math.floor(bb.x); xx < bb.x + bb.w; xx += 0.25) {
         if (inside([xx + 0.125, yy + 0.125], shape as Ring)) grid.mark({ x: xx, y: yy, w: 0.25, h: 0.25 }, Cell.Wall);
@@ -596,7 +640,7 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
       }
     }
     // The door goes on the longest edge that faces open street.
-    let best: { at: Vec; len: number } | undefined;
+    let best: { at: Vec; len: number; out: Vec } | undefined;
     for (let j = 0; j < r.length; j++) {
       const a = r[j]!, q = r[(j + 1) % r.length]!;
       const len = Math.hypot(q[0] - a[0], q[1] - a[1]);
@@ -607,7 +651,7 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
       const probe = (s: number): Pt => [ar.x + (mid[0] + nx * s) * M_PER_SQUARE, ar.y + (mid[1] + ny * s) * M_PER_SQUARE];
       const outside = open(probe(1.5)) && !inside(probe(1.5), bd) ? 1 : open(probe(-1.5)) && !inside(probe(-1.5), bd) ? -1 : 0;
       if (!outside) continue;
-      if (!best || len > best.len) best = { at: mid, len };
+      if (!best || len > best.len) best = { at: mid, len, out: [nx * outside, ny * outside] };
     }
     const others = (p: Vec) => !open([ar.x + p[0] * M_PER_SQUARE, ar.y + p[1] * M_PER_SQUARE]);
     const wins = indoor ? windowsOf(r, best?.at, others, new Rng(`${plan.seed}:windows:p${i}`)) : [];
@@ -616,9 +660,15 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
       doors: [...(best && door ? [{ at: px(best.at), texture: door.res, width: 1 }] : []), ...wins.map((p) => ({ at: px(p), texture: windowTex!.res, width: 1, closed: true }))],
     });
     elements[res.id] = { kind: "wall", key: `house#${i}` };
+    houseWalls.push(r);
+    if (best && door) doorSpots.push(best.at);
     const nDoor = best && door ? 1 : 0;
     res.doors.forEach((nid, k) => (elements[nid] = k < nDoor ? { kind: "door", key: `door:house#${i}`, zone: zoneId, state: "closed" } : { kind: "window", key: `window:house#${i}#${k - nDoor}`, zone: zoneId }));
-    furnish(`house#${i}`, r, r, best?.at, castle.some((d) => inside(c, d.ring)) && ringArea(bd) > 150 ? "keep" : "house", plotShops.get(nearIdx[i]!));
+    const plotKind = castle.some((d) => inside(c, d.ring)) && ringArea(bd) > 150 ? "keep" : "house";
+    const plotTrade = plotShops.get(nearIdx[i]!);
+    furnish(`house#${i}`, r, r, best?.at, plotKind, plotTrade);
+    const plotLamps = plotKind === "keep" ? 2 : plotTrade && !TRADES[plotTrade].secret ? 1 : 0;
+    if (plotLamps && best && door) doorLamps.push({ at: best.at, out: best.out, n: plotLamps });
     // Buildings are solid for the dressing grid.
     const bb = bboxOf(r);
     for (let yy = Math.floor(bb.y); yy < bb.y + bb.h; yy += 0.25) for (let xx = Math.floor(bb.x); xx < bb.x + bb.w; xx += 0.25) {
@@ -631,9 +681,14 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     const castleTex = use(cat.ofUse("wall_castle", "wall_stone").filter((a) => a.kind === "wall" && (a.footprint?.[1] ?? 0) >= 0.7).sort((a, c) => (b2(c) - b2(a)) || a.id.localeCompare(c.id))[0] ?? st.wall);
     const ring = wall.ring.map(sq);
     const gates: Vec[] = [];
+    const gateDirs: Vec[] = [];
     for (const road of city.roads) for (let i = 0; i + 1 < road.points.length; i++) for (let j = 0; j < ring.length; j++) {
-      const hit = segCross(sq(road.points[i]!), sq(road.points[i + 1]!), ring[j]!, ring[(j + 1) % ring.length]!);
-      if (hit) gates.push(hit);
+      const p = ring[j]!, q = ring[(j + 1) % ring.length]!;
+      const hit = segCross(sq(road.points[i]!), sq(road.points[i + 1]!), p, q);
+      if (!hit) continue;
+      const len = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+      gates.push(hit);
+      gateDirs.push([(q[0] - p[0]) / len, (q[1] - p[1]) / len]);
     }
     const halfGate = (city.roadWidth * k) / 2 + 0.6;
     // Walk the ring, cutting it into runs at gates and at the map border.
@@ -676,12 +731,31 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
       place(ctx, { asset: tower, role: "tower", at: v, rot: rng.int(0, 3) * (Math.PI / 2), scale, layer: LAYER.overhead, zone: zoneId, feature: "towers", occupy: "force", light: false });
       grid.mark(rectAt(v, [city.towerRadius * 2 * k, city.towerRadius * 2 * k]), Cell.Wall);
     }
-    // Braziers flank each gate.
-    for (const g of gates) {
-      if (g[0] < 1 || g[1] < 1 || g[0] > w - 1 || g[1] > h - 1) continue;
-      const fire = pick(ctx, zoneId, "brazier", { maxSide: 1.4 });
-      if (fire) for (const sgn of [-1, 1]) place(ctx, { asset: fire, role: "brazier", at: [g[0] + sgn * (halfGate + 0.8), g[1] + 1.2], rot: 0, layer: LAYER.furniture, zone: zoneId, feature: "gate_fires", occupy: "solid", light: LIGHTS.brazier });
-    }
+    // Braziers flank each gate on either side of the road: just inside the wall, or in front of it when a gatehouse fills the inside.
+    const town: Vec = [ring.reduce((a, p) => a + p[0], 0) / ring.length, ring.reduce((a, p) => a + p[1], 0) / ring.length];
+    gates.forEach((g, gi) => {
+      if (g[0] < 1 || g[1] < 1 || g[0] > w - 1 || g[1] > h - 1) return;
+      if (gates.slice(0, gi).some((o) => Math.hypot(o[0] - g[0], o[1] - g[1]) < 1)) return;
+      const fire = streetLight("brazier", 1.4);
+      if (!fire) return;
+      const d = gateDirs[gi]!;
+      let nrm: Vec = [-d[1], d[0]];
+      if ((town[0] - g[0]) * nrm[0] + (town[1] - g[1]) * nrm[1] < 0) nrm = [-nrm[0], -nrm[1]];
+      // At the roadside (the road is path, which a brazier may stand on), stepping back from the wall until there is room.
+      for (const face of [1, -1]) {
+        let placed2 = 0;
+        for (const sgn of [-1, 1]) {
+          let done = false;
+          for (const depth of [1.6, 2.4, 3.2, 4.2, 5.4, 6.6]) for (const side of [halfGate - 0.2, halfGate + 0.5]) {
+            if (done) break;
+            const at: Vec = [g[0] + d[0] * sgn * side + nrm[0] * depth * face, g[1] + d[1] * sgn * side + nrm[1] * depth * face];
+            done = !!place(ctx, { asset: fire, role: "brazier", at, rot: 0, layer: LAYER.furniture, zone: zoneId, feature: "gate_fires", occupy: "clutter", light: LIGHTS.brazier });
+          }
+          if (done) placed2++;
+        }
+        if (placed2) break;
+      }
+    });
   }
 
   // Wall bands and water are off limits for props.
@@ -812,10 +886,23 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
       const at: Vec = [bb.x + rng.range(1, bb.w - 1), bb.y + rng.range(1, bb.h - 1)];
       if (a && inside(at as Pt, r)) place(ctx, { asset: a, role, at, rot: rng.range(0, Math.PI * 2), layer: LAYER.furniture, zone: zoneId, feature: "market_goods", occupy: "solid" });
     }
+    // Braziers for the night, spread over the square between the stalls.
+    const brazier = streetLight("brazier", 1.4);
+    if (brazier && bb.w > 4 && bb.h > 4) {
+      const want = Math.max(2, Math.min(14, Math.round(ringArea(r) / 70)));
+      const fires: Vec[] = [];
+      for (let t = 0; t < 200 && fires.length < want; t++) {
+        const at: Vec = [bb.x + lrng.range(1.5, bb.w - 1.5), bb.y + lrng.range(1.5, bb.h - 1.5)];
+        if (!inside(at as Pt, r) || !insideMap(at, 1.5) || fires.some((f) => Math.hypot(f[0] - at[0], f[1] - at[1]) < 6)) continue;
+        if (!grid.fits(rectAt(at, [1.4, 1.4]), (cv) => cv === Cell.Free)) continue;
+        if (place(ctx, { asset: brazier, role: "brazier", at, rot: 0, layer: LAYER.furniture, zone: zoneId, feature: "market_fires", occupy: "solid", light: LIGHTS.brazier })) fires.push(at);
+      }
+    }
   }
 
   // Street clutter against the house walls: walk the building edges that face the street.
-  const clutter: Array<[string, number]> = [["barrel", 3], ["crate", 3], ["sack", 2], ["basket", 1], ["trough", 0.4], ["debris", 0.6]];
+  // No troughs: the library's only troughs are a magic shop's glowing fungi planters.
+  const clutter: Array<[string, number]> = [["barrel", 3], ["crate", 3], ["sack", 2], ["basket", 1], ["debris", 0.6]];
   for (const bd of near) {
     const r = clipRing(bd, box).map(sq);
     if (r.length < 3) continue;
@@ -848,24 +935,7 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     const p = inMap.length ? rng.pick(inMap) : undefined;
     if (p) place(ctx, { asset: a, role: "cart", at: [p[0] + rng.range(-1.5, 1.5), p[1] + rng.range(-1.5, 1.5)], rot: rng.range(0, Math.PI * 2), layer: LAYER.furniture, zone: zoneId, feature: "carts", occupy: "solid" });
   }
-  const lamp = pick(ctx, zoneId, "lamp_post", { maxSide: 1.5 });
-  if (lamp) for (const road of city.roads) {
-    let acc = 0;
-    const pts = road.points.map(sq);
-    for (let i = 0; i + 1 < pts.length; i++) {
-      const a = pts[i]!, q = pts[i + 1]!;
-      const len = Math.hypot(q[0] - a[0], q[1] - a[1]);
-      for (let t = 0; t < len; t += 1) {
-        acc += 1;
-        if (acc % 14 !== 0) continue;
-        const nx = -(q[1] - a[1]) / len, ny = (q[0] - a[0]) / len;
-        const side = acc % 28 === 0 ? 1 : -1;
-        const at: Vec = [a[0] + ((q[0] - a[0]) * t) / len + nx * side * ((road.width * k) / 2 + 0.6), a[1] + ((q[1] - a[1]) * t) / len + ny * side * ((road.width * k) / 2 + 0.6)];
-        if (at[0] < 1 || at[1] < 1 || at[0] > w - 1 || at[1] > h - 1) continue;
-        place(ctx, { asset: lamp, role: "lamp_post", at, rot: 0, layer: LAYER.furniture, zone: zoneId, feature: "lamps", occupy: "solid", light: LIGHTS.lamp_post });
-      }
-    }
-  }
+
   // Trees outside the walls and in greens.
   for (const t of city.trees) {
     const at = sq(t);
@@ -938,14 +1008,107 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     if (a && grid.fits(rectAt(at, [0.5, 0.5]), (cv) => cv !== Cell.Wall)) place(ctx, { asset: a, role, at, rot: rng.range(0, Math.PI * 2), layer: LAYER.decal, zone: zoneId, feature: "street_grime", occupy: "low", light: false });
   }
 
+  // A torch or lamp on the wall beside the street door of the public and the great buildings.
+  const torch = streetLight("torch", 1.3, true) ?? streetLight("sconce", 1.3, true);
+  for (const d of torch ? doorLamps : []) {
+    const along: Vec = [-d.out[1], d.out[0]];
+    const off = frontSize(torch!).depth / 2 + 0.12;
+    for (const sg of d.n === 2 ? [-1, 1] : [lrng.next() < 0.5 ? -1 : 1]) {
+      const at: Vec = [d.at[0] + along[0] * 0.95 * sg + d.out[0] * off, d.at[1] + along[1] * 0.95 * sg + d.out[1] * off];
+      if (insideMap(at, 0.4)) place(ctx, { asset: torch!, role: "torch", at, rot: rotationFor(torch!, d.out), layer: LAYER.overhead, zone: zoneId, feature: "door_lights", occupy: "force", light: LIGHTS.torch });
+    }
+  }
+
+  // Street lights, about every seven squares: a lantern on a house wall that fronts the street; a
+  // standing torch at the street edge of a plot whose house stands back from it; a standing torch
+  // by the main road where no light is near (open stretches, squares). Out in the country (outside
+  // the town wall, or away from the houses of a town without one) the roads stay dark.
+  const SPACING = 7;
+  const shining: Vec[] = ctx.placed.filter((p) => p.light && !p.key.startsWith("house#")).map((p) => (p.center ?? [p.x, p.y]) as Vec);
+  const far = (p: Vec) => shining.every((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) >= SPACING);
+  const metres = (p: Vec): Pt => [ar.x + p[0] * M_PER_SQUARE, ar.y + p[1] * M_PER_SQUARE];
+  const inTown = (p: Vec) => (wall ? insideWalls(metres(p)) : near.some((bd) => ringDist(metres(p), bd) < 12));
+  const wallLamp = streetLight("sconce", 1.1, true) ?? torch;
+  if (wallLamp) {
+    const off = frontSize(wallLamp).depth / 2 + 0.12;
+    for (const ring of houseWalls) for (let j = 0; j < ring.length; j++) {
+      const a = ring[j]!, q = ring[(j + 1) % ring.length]!;
+      const len = Math.hypot(q[0] - a[0], q[1] - a[1]);
+      if (len < 2) continue;
+      let n: Vec = [-(q[1] - a[1]) / len, (q[0] - a[0]) / len];
+      if (inside([(a[0] + q[0]) / 2 + n[0] * 0.4, (a[1] + q[1]) / 2 + n[1] * 0.4] as Pt, ring as Ring)) n = [-n[0], -n[1]];
+      for (let t = 1; t <= len - 1; t += 1) {
+        const e: Vec = [a[0] + ((q[0] - a[0]) * t) / len, a[1] + ((q[1] - a[1]) * t) / len];
+        const at: Vec = [e[0] + n[0] * off, e[1] + n[1] * off];
+        if (!insideMap(at, 0.6) || !far(at) || !inTown(at) || doorSpots.some((d) => Math.hypot(d[0] - e[0], d[1] - e[1]) < 1.3)) continue;
+        // Facing the street: open street within four squares in front, nothing walled in between.
+        let street = false;
+        for (const d of [1.2, 2.2, 3.2, 4.2]) {
+          const f: Vec = [e[0] + n[0] * d, e[1] + n[1] * d];
+          if (!grid.fits(rectAt(f, [0.4, 0.4]), (c) => c !== Cell.Wall)) break;
+          if (open(metres(f))) { street = true; break; }
+        }
+        if (street && place(ctx, { asset: wallLamp, role: "lantern", at, rot: rotationFor(wallLamp, n), layer: LAYER.overhead, zone: zoneId, feature: "street_lights", occupy: "force", light: LIGHTS.lantern })) shining.push(at);
+      }
+    }
+  }
+  const post = cat.named("Torch - Standing")[0] ?? streetLight("lantern", 0.8);
+  // The street edge of every plot (the city's building outlines are plots; the houses stand inside them).
+  if (post) for (const bd of near) {
+    const r = clipRing(bd, box).map(sq);
+    if (r.length < 3) continue;
+    for (let j = 0; j < r.length; j++) {
+      const a = r[j]!, q = r[(j + 1) % r.length]!;
+      const len = Math.hypot(q[0] - a[0], q[1] - a[1]);
+      if (len < 2) continue;
+      let n: Vec = [-(q[1] - a[1]) / len, (q[0] - a[0]) / len];
+      if (inside([(a[0] + q[0]) / 2 + n[0] * 0.4, (a[1] + q[1]) / 2 + n[1] * 0.4] as Pt, r as Ring)) n = [-n[0], -n[1]];
+      for (let t = 1; t <= len - 1; t += 1) {
+        const at: Vec = [a[0] + ((q[0] - a[0]) * t) / len + n[0] * 0.6, a[1] + ((q[1] - a[1]) * t) / len + n[1] * 0.6];
+        if (!insideMap(at, 0.8) || !far(at) || !inTown(at) || !open(metres(at))) continue;
+        if (place(ctx, { asset: post, role: "torch", at, rot: 0, layer: LAYER.furniture, zone: zoneId, feature: "street_lights", occupy: "clutter", light: LIGHTS.torch })) shining.push(at);
+      }
+    }
+  }
+  if (post) for (const road of city.roads) {
+    const pts = road.points.map(sq);
+    const off = (road.width * k) / 2 + 0.5;
+    let side = 1;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i]!, q = pts[i + 1]!;
+      const len = Math.hypot(q[0] - a[0], q[1] - a[1]);
+      if (len < 1e-6) continue;
+      const nrm: Vec = [-(q[1] - a[1]) / len, (q[0] - a[0]) / len];
+      for (let t = 0; t < len; t += 1) {
+        const c: Vec = [a[0] + ((q[0] - a[0]) * t) / len, a[1] + ((q[1] - a[1]) * t) / len];
+        if (!insideMap(c, 1) || !inTown(c) || !far(c)) continue;
+        for (const sd of [side, -side]) {
+          const at: Vec = [c[0] + nrm[0] * off * sd, c[1] + nrm[1] * off * sd];
+          if (insideMap(at, 0.8) && place(ctx, { asset: post, role: "torch", at, rot: 0, layer: LAYER.furniture, zone: zoneId, feature: "road_lights", occupy: "clutter", light: LIGHTS.torch })) {
+            shining.push(at);
+            side = -sd;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Whatever street is still dark (wide streets, small squares, greens): a standing torch on a three-square lattice.
+  if (post) for (let y = 1.5; y < h - 1; y += 3) for (let x = 1.5; x < w - 1; x += 3) {
+    const at: Vec = [x, y];
+    if (!far(at) || !inTown(at) || !open(metres(at)) || city.water.some((wr) => inside(metres(at), wr))) continue;
+    if (place(ctx, { asset: post, role: "torch", at, rot: 0, layer: LAYER.furniture, zone: zoneId, feature: "street_lights", occupy: "clutter", light: LIGHTS.torch })) shining.push(at);
+  }
+
   // Objects and lights.
   const placed: Placed[] = ctx.placed;
   for (const p of placed) {
     use(p.asset);
     const id = b.addObject({ at: px([p.x, p.y]), texture: p.asset.res, rotation: p.rotation, scale: p.scale, layer: p.layer, customColor: p.customColor, shadow: p.layer >= 300 && p.layer < 700 });
     elements[id] = { kind: "object", key: p.key, zone: p.zone, feature: p.feature, type: p.type, asset: p.asset.id };
-    const night = plan.mood?.time !== "day";
-    if (p.light && night) {
+    // Lamps by day too: Foundry lights them at dusk (LAMPS_LIT_FROM), as the clock darkens the scene.
+    if (p.light) {
       const lid = b.addLight({ at: px(p.center ?? [p.x, p.y]), range: Math.max(1.5, p.light.range * reach), color: p.light.color, intensity: p.light.intensity ?? 1 });
       elements[lid] = { kind: "light", key: `${p.key}/light`, zone: p.zone };
     }
@@ -961,6 +1124,7 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     map,
     elements,
     placed,
+    sheltered,
     notes: [...b.warnings, ...ctx.notes, ...notes],
     summary: {
       objects: placed.length,

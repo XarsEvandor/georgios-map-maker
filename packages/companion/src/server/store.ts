@@ -4,10 +4,10 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import {
-  adoptSavedMap, allHotSpots, areaPlan, Catalog, diffMaps, generate, GENRE_SETTINGS, hotspotPlan, parseCity, placePeople, PlanError, toFoundryScene, TRADES, validatePlan, ZONE_TYPES,
+  adoptSavedMap, allHotSpots, areaPlan, Catalog, diffMaps, generate, GENRE_SETTINGS, hotspotPlan, parseCity, placePeople, PlanError, shelterOf, toFoundryScene, TRADES, validatePlan, ZONE_TYPES,
   type Box, type Person, type City, type HotSpot, type Pt,
   type AssetIndex, type Directive, type FoundrySceneData, type GeneratedMap, type GeneratedVersion, type Genre, type Lock, type RoundTripResult, type ScenePlan,
 } from "@gmm/core";
@@ -15,6 +15,7 @@ import type { AssetSource } from "../assets/source";
 import { leafImage, renderMap, type RenderOptions } from "../render/render";
 import { cityKey, cityLink, fetchCityJson } from "../city/fetch";
 import { cityScale, renderCity, type CityImage } from "../city/render";
+import { renderCityNight } from "../city/night";
 
 /** What the Foundry module needs to make a city scene. */
 export interface CityInfo {
@@ -234,7 +235,7 @@ export class MapStore {
     const v = this.version(id, version);
     const doors = Object.fromEntries(Object.entries(v.elements).filter(([, e]) => e.kind === "door").map(([nid, e]) => [nid, { state: e.state, width: e.width, leaf: e.leaf }]));
     const decorative = new Set(Object.entries(v.elements).filter(([, e]) => e.kind === "wall" && /^(quay|pier)#/.test(e.key)).map(([nid]) => nid));
-    return toFoundryScene(v.map, { name: `${s.plan.title ?? s.id} (${v.name})`, pps, doors, decorative });
+    return toFoundryScene(v.map, { name: `${s.plan.title ?? s.id} (${v.name})`, pps, doors, decorative, sheltered: v.sheltered ?? shelterOf(s.gen.layout) });
   }
 
   /** Townsfolk for a built map, in scene pixels (token top-left corners), with the way each faces as a token rotation. */
@@ -324,6 +325,17 @@ export class MapStore {
   async cityImage(key: string): Promise<Buffer> {
     if (!/^[0-9a-f]{8,40}$/.test(key)) throw new Error("bad city key");
     return readFile(join(this.cityDir(), `${key}.webp`));
+  }
+
+  /** The city at night (city/night.ts), kept beside its day image and drawn again whenever the day image is newer. */
+  async cityNightImage(key: string): Promise<Buffer> {
+    if (!/^[0-9a-f]{8,40}$/.test(key)) throw new Error("bad city key");
+    const dayFile = join(this.cityDir(), `${key}.webp`), nightFile = join(this.cityDir(), `${key}.night.webp`);
+    const [d, n] = await Promise.all([stat(dayFile), stat(nightFile).catch(() => undefined)]);
+    if (n && n.mtimeMs >= d.mtimeMs) return readFile(nightFile);
+    const image = await renderCityNight(await readFile(dayFile), await this.city(key));
+    await writeFile(nightFile, image);
+    return image;
   }
 
   private async hotspot(key: string, id: string): Promise<{ city: City; hs: HotSpot }> {

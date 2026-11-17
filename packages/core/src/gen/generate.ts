@@ -6,7 +6,7 @@ import type { Vec2 } from "../ddmap/godot";
 import { Catalog, GENRE_SETTINGS, type FloorKind } from "./catalog";
 import { dress, type PathPlan, type Placed } from "./dress";
 import { dressExterior } from "./exterior";
-import { layoutBuilding, outerWallRuns, type Layout } from "./layout";
+import { layoutBuilding, outerWallRuns, shelterOf, type Layout, type Shelter } from "./layout";
 import { validatePlan, type PlanIssue, type ScenePlan } from "./plan";
 import { RECIPE_BY_TYPE, rolesOfRecipe } from "./recipes";
 import { Rng } from "./rng";
@@ -63,6 +63,8 @@ export interface GeneratedVersion {
   /** Dungeondraft node id -> what the element is. */
   elements: Record<string, ElementInfo>;
   placed: Placed[];
+  /** Where the weather stays out (roofed buildings, or all but an enclosed map's approach), in squares. */
+  sheltered?: Shelter[];
   notes: string[];
   summary: VersionSummary;
 }
@@ -407,6 +409,7 @@ function buildVersion(plan: ScenePlan, layout: Layout, cat: Catalog, st: Style, 
     map,
     elements,
     placed,
+    sheltered: shelterOf(layout),
     notes: [
       ...(layout.dropped?.length ? [`zones left out because the map is too small for them: ${layout.dropped.join(", ")}; make the map bigger or use fewer rooms`] : []),
       ...b.warnings,

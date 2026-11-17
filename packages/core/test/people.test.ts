@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { allHotSpots, Catalog, generate, hotspotPlan, parseCity, parseVector2Array, placePeople, PX_PER_SQUARE, TRADES, type GeneratedMap, type Person, type ScenePlan } from "../src/index";
+import { allHotSpots, Catalog, generate, hotspotPlan, parseCity, parseVector2Array, placePeople, PX_PER_SQUARE, RECIPE_BY_TYPE, TRADES, type GeneratedMap, type Person, type ScenePlan } from "../src/index";
 import { testIndex, townJson } from "./fixtures";
 
 type V = [number, number];
@@ -125,13 +125,24 @@ describe("people on the street", () => {
         if (water.some((wp: V[]) => inPoly([p.x, p.y], wp))) expect(decks.some((d: V[]) => inPoly([p.x, p.y], d)), `${p.role} in the water on ${h.id}`).toBe(true);
       }
       guards += people.filter((p) => p.role === "gate guard").length;
-      keepers += people.filter((p) => Object.values(TRADES).some((t) => t.keeper === p.role)).length;
+      // Every trade's map has its own keeper in: shops, services, crafts and dens alike.
+      if (h.trade) {
+        expect(people.some((p) => p.role === TRADES[h.trade!].keeper), `${TRADES[h.trade!].keeper} on ${h.id}`).toBe(true);
+        keepers++;
+      }
     }
     expect(spots.some((h) => h.kind === "gate")).toBe(true);
     expect(guards).toBeGreaterThan(0);
-    // Every shop map has its keeper in.
-    expect(spots.some((h) => h.kind === "shop")).toBe(true);
-    expect(keepers).toBeGreaterThanOrEqual(spots.filter((h) => h.kind === "shop" && TRADES[h.trade!].room.startsWith("shop.")).length);
+    expect(keepers).toBeGreaterThan(0);
+  });
+
+  it("finds a keeper a place in every trade's room, counter or not", () => {
+    const rooms = new Set(Object.values(TRADES).map((t) => t.room));
+    for (const room of rooms) {
+      const r = RECIPE_BY_TYPE.get(room);
+      expect(r, room).toBeDefined();
+      expect(r!.steps.some((s) => s.id === "counter" || ("essential" in s && s.essential)), `${room} has a counter or a main piece`).toBe(true);
+    }
   });
 
   it("empties the market at night", () => {

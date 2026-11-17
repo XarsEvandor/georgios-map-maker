@@ -5,16 +5,28 @@
 
 import { CompanionClient, MODULE_ID, esc, latestMap, leafFileName, miniMarkdown, renderFileName, sceneData, withLeafTextures } from "./lib.js";
 import { importDialog, importWorld, listWorlds } from "./worlds.js";
-import { attachStats, populate, ringUp, statsPossible } from "./people.js";
+import { attachStats, PEOPLE_LOOK, populate, ringUp, statsPossible } from "./people.js";
 import { registerAreaTool } from "./area-tool.js";
+import { backgroundOf, registerClock, ROOFS_LOOK, syncScenes } from "./clock.js";
+import { offerStart, openCompanions } from "./launcher.js";
 
 const t = (key) => game.i18n.localize(`GMM.${key}`);
+
+/** fetch, plus an offer to start the companion when it does not answer at all. */
+async function companionFetch(...args) {
+  try {
+    return await fetch(...args);
+  } catch (e) {
+    if (e instanceof TypeError) offerStart("maps", "Georgios' Map Maker companion");
+    throw e;
+  }
+}
 
 function client() {
   const url = game.settings.get(MODULE_ID, "companionUrl");
   const token = game.settings.get(MODULE_ID, "token");
   if (!token) throw new Error(t("NoToken"));
-  return new CompanionClient(url, token);
+  return new CompanionClient(url, token, companionFetch);
 }
 
 async function upload(blob, name, type = "image/webp") {
@@ -54,6 +66,9 @@ async function buildScene(c, mapId, versionId, opts = {}) {
     }
   }
   const data = sceneData(exported, src, mapId, versionId);
+  data.flags[MODULE_ID].lamps = LAMPS_LOOK;
+  // The clock's weather falls on maps that keep it out of their buildings (an older companion sends none).
+  if (Array.isArray(exported.scene.sheltered)) data.flags[MODULE_ID].roofs = ROOFS_LOOK;
   if (opts.folder) data.folder = opts.folder;
   let scene = game.scenes.find((s) => s.getFlag(MODULE_ID, "mapId") === mapId);
   if (scene) {
@@ -66,8 +81,37 @@ async function buildScene(c, mapId, versionId, opts = {}) {
   await setBackground(scene, src);
   await scene.createEmbeddedDocuments("Wall", withLeafTextures(exported.scene.walls, leaves));
   await scene.createEmbeddedDocuments("AmbientLight", exported.scene.lights);
+  await setShelter(scene, exported.scene.sheltered);
+  // The export carries the map's own darkness; the clock sets every scene's.
+  await syncScenes();
   if (!opts.quiet) ui.notifications.info(`${t("SceneBuilt")}: ${scene.name}`);
   return scene;
+}
+
+/**
+ * One hidden region over the map's roofed buildings (or all but an enclosed map's approach) with
+ * Foundry's Suppress Weather behaviour: the clock's rain and snow fall in the streets, not indoors.
+ * Replaces the module's earlier one.
+ */
+async function setShelter(scene, sheltered) {
+  if (!Array.isArray(sheltered)) return;
+  const old = scene.regions?.filter((r) => r.getFlag(MODULE_ID, "sheltered")).map((r) => r.id) ?? [];
+  if (old.length) await scene.deleteEmbeddedDocuments("Region", old);
+  const shapes = sheltered.filter((s) => s.points?.length >= 6).map((s) => ({ type: "polygon", points: s.points, hole: !!s.hole }));
+  if (!shapes.length) return;
+  await scene.createEmbeddedDocuments("Region", [{
+    name: t("Indoors"), color: "#5b6b82", shapes,
+    behaviors: [{ type: "suppressWeather", name: t("NoWeatherIndoors") }],
+    flags: { [MODULE_ID]: { sheltered: true } },
+  }]);
+}
+
+/** Maps built before the weather: their roofs (setShelter) from the companion, without building them again. */
+async function ensureRoofs(scene, c = client()) {
+  const exported = await c.rpc("maps.export", { mapId: scene.getFlag(MODULE_ID, "mapId"), version: scene.getFlag(MODULE_ID, "version"), pps: scene.grid.size });
+  if (!Array.isArray(exported.scene?.sheltered)) throw new Error("the companion is older than the module: restart it");
+  await setShelter(scene, exported.scene.sheltered);
+  await scene.setFlag(MODULE_ID, "roofs", ROOFS_LOOK);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -141,6 +185,41 @@ async function addNewPins(scene) {
   await scene.setFlag(MODULE_ID, "pins", PINS_LOOK);
 }
 
+/** Bumped when the city's night image changes; city scenes get theirs again on the GM's next look. */
+const NIGHT_LOOK = 1;
+const nighting = new Set();
+
+/** True when a city scene has no night image yet, or its day image changed since (the city was drawn again). */
+function nightDue(scene) {
+  const shown = backgroundOf(scene);
+  const night = scene.getFlag(MODULE_ID, "nightSrc");
+  return scene.getFlag(MODULE_ID, "night") !== NIGHT_LOOK || !night || (shown !== night && shown !== scene.getFlag(MODULE_ID, "daySrc"));
+}
+
+/**
+ * Gives a city scene its night image: the city from above at night, its windows, street lamps,
+ * squares, towers and gates alight (companion city.night). The clock shows it from nightfall to
+ * first light and the day image the rest of the time.
+ */
+async function ensureNight(scene) {
+  if (nighting.has(scene.id)) return;
+  nighting.add(scene.id);
+  try {
+    const key = scene.getFlag(MODULE_ID, "city");
+    const shown = backgroundOf(scene);
+    // The day image is what the scene shows, unless it is showing the night one.
+    const daySrc = shown && shown !== scene.getFlag(MODULE_ID, "nightSrc") ? shown : scene.getFlag(MODULE_ID, "daySrc");
+    if (!key || !daySrc) return;
+    const c = client();
+    const info = await c.rpc("city.night", { city: key });
+    const nightSrc = await upload(await c.image(info.imagePath), `city-${key}-night-${Date.now()}.webp`);
+    await scene.update({ [`flags.${MODULE_ID}.daySrc`]: daySrc, [`flags.${MODULE_ID}.nightSrc`]: nightSrc, [`flags.${MODULE_ID}.night`]: NIGHT_LOOK });
+    await syncScenes();
+  } finally {
+    nighting.delete(scene.id);
+  }
+}
+
 /** Opens a city from its watabou city-generator link: city scene for everyone, then the hot spots build. */
 async function openCity(url, name) {
   if (!game.user.isGM) return ui.notifications.warn(t("GMOnly"));
@@ -180,6 +259,7 @@ async function openCity(url, name) {
   const now = info.hotspots.filter((h) => !h.onDemand).length;
   ui.notifications.info(`Map Maker: ${info.name} is open. Building ${now} places in the background; the others build when you open them.`);
   prebuild(c, scene, info, folder).catch((e) => ui.notifications.error(`Map Maker: ${e.message}`));
+  ensureNight(scene).catch((e) => console.warn(`${MODULE_ID} | night image for ${info.name}`, e));
   return scene;
 }
 
@@ -464,7 +544,9 @@ function renderWayUp() {
     b.addEventListener("click", (ev) => (ev.shiftKey ? tg.scene.activate() : tg.scene.view()));
     bar.append(b);
   }
-  document.body.append(bar);
+  const clock = document.getElementById("gmm-clock");
+  if (clock) clock.after(bar);
+  else document.body.append(bar);
 }
 
 Hooks.on("canvasReady", renderWayUp);
@@ -477,20 +559,24 @@ const populating = new Set();
 let toldAboutStats = false;
 let toldAboutRefresh = false;
 
-/** Bumped when street maps change their look; older street scenes are rebuilt when the GM opens them. 2: buildings from inside. 3: services, mansions, the garrison. */
-const STREET_LOOK = 3;
+/** Bumped when street maps change their look; older street scenes are rebuilt when the GM opens them. 2: buildings from inside. 3: services, mansions, the garrison. 4: lights at night. 5: street lamps. */
+const STREET_LOOK = 5;
 
-/** Rebuilds an older street map in place (image, walls, lights, townsfolk); other places are only marked. */
+/**
+ * Rebuilds an older street map in place (image, walls, lights, townsfolk). Other places of a city
+ * are rebuilt only when their lights are older (LAMPS_LOOK); otherwise just marked.
+ */
 async function refreshStreet(scene) {
   const c = client();
   const mapId = scene.getFlag(MODULE_ID, "mapId");
   const info = await c.rpc("maps.get", { mapId });
-  if (info.plan?.street) {
-    ui.notifications.info(`Map Maker: showing the buildings of ${scene.name} from inside, a moment...`);
-    await buildScene(c, mapId, scene.getFlag(MODULE_ID, "version"), { pps: STREET_PPS, folder: scene.folder?.id, quiet: true });
+  if (info.plan?.street || scene.getFlag(MODULE_ID, "lamps") !== LAMPS_LOOK) {
+    ui.notifications.info(`Map Maker: bringing ${scene.name} up to date (lights for the night), a moment...`);
+    await buildScene(c, mapId, scene.getFlag(MODULE_ID, "version"), { pps: scene.grid.size, folder: scene.folder?.id, quiet: true });
     await populate(c, scene).catch((e) => console.warn(`${MODULE_ID} | townsfolk not placed on ${scene.name}`, e));
     ui.notifications.info(`Map Maker: ${scene.name} is ready.`);
   }
+  if (scene.getFlag(MODULE_ID, "roofs") !== ROOFS_LOOK) await ensureRoofs(scene, c);
   await scene.setFlag(MODULE_ID, "look", STREET_LOOK);
 }
 Hooks.on("canvasReady", () => {
@@ -511,7 +597,8 @@ Hooks.on("canvasReady", () => {
     return;
   }
   const people = scene.tokens.filter((tk) => tk.getFlag(MODULE_ID, "person"));
-  const fresh = scene.getFlag(MODULE_ID, "people") === undefined;
+  // No townsfolk yet, or placed by an older rule (PEOPLE_LOOK): placed (again).
+  const fresh = scene.getFlag(MODULE_ID, "people") === undefined || scene.getFlag(MODULE_ID, "peopleLook") !== PEOPLE_LOOK;
   const bare = people.some((tk) => !tk.actorId);
   const unringed = people.some((tk) => !tk.ring?.enabled);
   if (bare && !statsPossible() && !toldAboutStats && game.system.id === "dnd5e") {
@@ -540,23 +627,109 @@ Hooks.on("canvasReady", () => {
 });
 Hooks.on("updateScene", (scene) => { if (scene.id === canvas.scene?.id) renderWayUp(); });
 
-/** City scenes opened before shops existed get their shop pins on the GM's first look. */
+/** City scenes get the pins they are missing, and their night image, on the GM's first look. */
 let toldAboutPins = false;
 Hooks.on("canvasReady", () => {
   const scene = canvas.scene;
   if (!game.user.isGM || game.users.activeGM?.id !== game.user.id) return;
-  if (!scene?.getFlag(MODULE_ID, "city") || scene.getFlag(MODULE_ID, "mapId") || scene.getFlag(MODULE_ID, "pins") === PINS_LOOK) return;
-  addNewPins(scene).catch((e) => {
-    console.error(`${MODULE_ID} | new pins for ${scene.name}`, e);
-    if (!toldAboutPins) ui.notifications.warn(`Map Maker: could not check ${scene.name} for new places (${e.message}). Is the companion running?`);
+  if (!scene?.getFlag(MODULE_ID, "city") || scene.getFlag(MODULE_ID, "mapId")) return;
+  const pins = scene.getFlag(MODULE_ID, "pins") !== PINS_LOOK;
+  if (!pins && !nightDue(scene)) return;
+  // New pins first (they may draw the city again), then its night image.
+  (pins ? addNewPins(scene) : Promise.resolve()).then(() => (nightDue(scene) ? ensureNight(scene) : undefined)).catch((e) => {
+    console.error(`${MODULE_ID} | new pins or night image for ${scene.name}`, e);
+    if (!toldAboutPins) ui.notifications.warn(`Map Maker: could not bring ${scene.name} up to date (${e.message}). Is the companion running?`);
     toldAboutPins = true;
   });
 });
 
+/**
+ * Bumped when the module's lights change; maps built before are rebuilt (image, walls, lights) on
+ * the GM's first look, since the lights come with new pieces in the picture. 1: lamps light from
+ * dusk to dawn with the clock. 2: a light in every room, burning hearths, torches by public doors,
+ * braziers at gates and on markets, lanterns on piers. 3: street lamps. City maps go through refreshStreet.
+ */
+const LAMPS_LOOK = 3;
+let toldAboutLamps = false;
+
+async function refreshLamps(scene) {
+  ui.notifications.info(`Map Maker: bringing ${scene.name} up to date (lights for the night), a moment...`);
+  await buildScene(client(), scene.getFlag(MODULE_ID, "mapId"), scene.getFlag(MODULE_ID, "version"), { pps: scene.grid.size, folder: scene.folder?.id, quiet: true });
+  ui.notifications.info(`Map Maker: ${scene.name} is ready.`);
+}
+Hooks.on("canvasReady", () => {
+  const scene = canvas.scene;
+  if (!game.user.isGM || game.users.activeGM?.id !== game.user.id) return;
+  if (!scene?.getFlag(MODULE_ID, "mapId") || scene.getFlag(MODULE_ID, "city") || scene.getFlag(MODULE_ID, "lamps") === LAMPS_LOOK || populating.has(scene.id)) return;
+  populating.add(scene.id);
+  refreshLamps(scene).finally(() => populating.delete(scene.id)).catch((e) => {
+    console.error(`${MODULE_ID} | lamps for ${scene.name}`, e);
+    if (!toldAboutLamps) ui.notifications.warn(`Map Maker: could not give ${scene.name} its lamps (${e.message}). Is the companion running?`);
+    toldAboutLamps = true;
+  });
+});
+
+/**
+ * Maps from before the weather get their roofs (unless a rebuild above gives them): all of them in
+ * the background when the GM loads the world, so the weather shows on every map, not only on the
+ * ones the GM has opened; and any left over on the GM's first look.
+ */
+const roofing = new Set();
+let toldAboutRoofs = false;
+const roofsDue = (scene) => {
+  if (!scene?.getFlag(MODULE_ID, "mapId") || scene.getFlag(MODULE_ID, "roofs") === ROOFS_LOOK || roofing.has(scene.id)) return false;
+  const rebuild = scene.getFlag(MODULE_ID, "city") ? scene.getFlag(MODULE_ID, "look") !== STREET_LOOK : scene.getFlag(MODULE_ID, "lamps") !== LAMPS_LOOK;
+  return !rebuild;
+};
+async function roofScene(scene, c) {
+  roofing.add(scene.id);
+  try {
+    await ensureRoofs(scene, c);
+  } catch (e) {
+    console.error(`${MODULE_ID} | roofs for ${scene.name}`, e);
+    if (!toldAboutRoofs) ui.notifications.warn(`Map Maker: ${scene.name} gets no weather until it knows where its roofs are (${e.message}). Is the companion running?`);
+    toldAboutRoofs = true;
+    throw e;
+  } finally {
+    roofing.delete(scene.id);
+  }
+}
+Hooks.on("canvasReady", () => {
+  const scene = canvas.scene;
+  if (!game.user.isGM || game.users.activeGM?.id !== game.user.id || !roofsDue(scene)) return;
+  roofScene(scene).catch(() => {});
+});
+Hooks.once("ready", async () => {
+  if (!game.user.isGM || game.users.activeGM?.id !== game.user.id) return;
+  const due = game.scenes.filter(roofsDue);
+  if (!due.length) return;
+  let c;
+  try {
+    c = client();
+  } catch {
+    return;
+  }
+  let done = 0;
+  for (const scene of due) {
+    try {
+      await roofScene(scene, c);
+      done++;
+    } catch {
+      break;
+    }
+  }
+  if (done) ui.notifications.info(`Map Maker: ${done} map${done === 1 ? "" : "s"} now keep the weather out of their buildings, so the weather shows on them too.`);
+});
+
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, "companionUrl", { name: "GMM.CompanionUrl", hint: "GMM.CompanionUrlHint", scope: "client", config: true, type: String, default: "http://127.0.0.1:47110" });
+  game.settings.register(MODULE_ID, "launcherUrl", { name: "GMM.Launcher.Url", hint: "GMM.Launcher.UrlHint", scope: "client", config: true, type: String, default: "http://127.0.0.1:47100" });
   // Client scope keeps the token in this browser only; world settings would reach every player.
   game.settings.register(MODULE_ID, "token", { name: "GMM.Token", hint: "GMM.TokenHint", scope: "client", config: true, type: String, default: "" });
+  // Actor files already imported from the drop folder (importActors).
+  game.settings.register(MODULE_ID, "importedActors", { scope: "world", config: false, type: Array, default: [] });
+  // Token change files already applied from the drop folder (importUpdates).
+  game.settings.register(MODULE_ID, "importedUpdates", { scope: "world", config: false, type: Array, default: [] });
   game.settings.register(MODULE_ID, "pps", { name: "GMM.Resolution", hint: "GMM.ResolutionHint", scope: "world", config: true, type: Number, default: 100, choices: { 70: "70", 100: "100", 140: "140", 200: "200" } });
   // "Import a world" in the module settings opens the bundle picker.
   class ImportWorldMenu extends foundry.applications.api.ApplicationV2 {
@@ -568,12 +741,81 @@ Hooks.once("init", () => {
   game.settings.registerMenu(MODULE_ID, "importWorld", { name: "GMM.ImportWorld", label: "GMM.ImportWorldLabel", hint: "GMM.ImportWorldHint", icon: "fa-solid fa-earth-europe", type: ImportWorldMenu, restricted: true });
   // The left toolbar's "Georgios' Modules" group: the "Map an area" tool and the panel button
   // (Georgios Scribbler adds its buttons to the same group).
-  registerAreaTool({ openPanel, onArea: buildArea, t });
+  registerAreaTool({ openPanel, onArea: buildArea, t, openCompanions });
+  // The clock bar at the top, and every scene's light following it.
+  registerClock();
 });
 
 Hooks.once("ready", () => {
   game.modules.get(MODULE_ID).api = { open: openPanel, buildScene: (mapId, version) => buildScene(client(), mapId, version), openCity, importWorld, importDialog, listWorlds, populate: (scene = canvas.scene) => populate(client(), scene) };
+  if (game.user.isGM && game.users.activeGM?.id === game.user.id) {
+    importActors()
+      .then(() => importUpdates())
+      .catch((e) => console.error(`${MODULE_ID} | imports`, e));
+  }
 });
+
+/**
+ * Token changes dropped into Data/georgios-map-maker/imports/updates, applied once on the GM's
+ * next load. Each .json file: { id, note?, actorTokens: [{ actor, update }] }; every update goes
+ * to the actor's prototype token and to all of its tokens already placed in any scene.
+ */
+async function importUpdates() {
+  const FP = foundry.applications?.apps?.FilePicker?.implementation ?? globalThis.FilePicker;
+  let files = [];
+  try {
+    ({ files } = await FP.browse("data", `${MODULE_ID}/imports/updates`));
+  } catch {
+    return; // No drop folder.
+  }
+  const done = new Set(game.settings.get(MODULE_ID, "importedUpdates") ?? []);
+  for (const file of files.filter((f) => f.toLowerCase().endsWith(".json"))) {
+    const job = await (await fetch(file)).json();
+    const tag = job.id ?? file;
+    if (done.has(tag)) continue;
+    let tokens = 0, actors = 0;
+    for (const { actor: id, update } of job.actorTokens ?? []) {
+      const actor = game.actors.get(id);
+      if (!actor) continue;
+      await actor.update(Object.fromEntries(Object.entries(update).map(([k, v]) => [`prototypeToken.${k}`, v])));
+      actors++;
+      for (const scene of game.scenes) {
+        const ups = scene.tokens.filter((tk) => tk.actorId === id).map((tk) => ({ _id: tk.id, ...update }));
+        if (ups.length) { await scene.updateEmbeddedDocuments("Token", ups); tokens += ups.length; }
+      }
+    }
+    done.add(tag);
+    await game.settings.set(MODULE_ID, "importedUpdates", [...done]);
+    ui.notifications.info(`Map Maker: ${job.note ?? tag} (${actors} actors, ${tokens} placed tokens).`);
+  }
+}
+
+/**
+ * Actors dropped into Data/georgios-map-maker/imports/actors (one actor's data per .json file,
+ * embedded items and effects included) are created once in this world, on the GM's next load.
+ * No token is placed. A file is never imported twice, even after the actor is deleted.
+ */
+async function importActors() {
+  const FP = foundry.applications?.apps?.FilePicker?.implementation ?? globalThis.FilePicker;
+  let files = [];
+  try {
+    ({ files } = await FP.browse("data", `${MODULE_ID}/imports/actors`));
+  } catch {
+    return; // No drop folder.
+  }
+  const done = new Set(game.settings.get(MODULE_ID, "importedActors") ?? []);
+  for (const file of files.filter((f) => f.toLowerCase().endsWith(".json"))) {
+    const data = await (await fetch(file)).json();
+    const tag = data.flags?.[MODULE_ID]?.importedFrom ?? file;
+    if (done.has(tag)) continue;
+    if (!game.actors.get(data._id)) {
+      await Actor.implementation.create(data, { keepId: true });
+      ui.notifications.info(`Map Maker: ${data.name} added to the actors.`);
+    }
+    done.add(tag);
+    await game.settings.set(MODULE_ID, "importedActors", [...done]);
+  }
+}
 
 Hooks.on("renderSceneDirectory", (app, html) => {
   if (!game.user.isGM) return;

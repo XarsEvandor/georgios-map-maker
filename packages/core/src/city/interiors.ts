@@ -386,6 +386,8 @@ export function furnishBuilding(inp: InteriorInput): Interior {
       key: pre + p.key,
       zone: inp.zone,
       room: roomType.get(p.zone),
+      // The shop's own room (not its back rooms, which may be another trade's kind of room).
+      ...(inp.trade && p.zone === main.id ? { trade: inp.trade } : {}),
       x: pos[0],
       y: pos[1],
       rotation: p.rotation + theta,

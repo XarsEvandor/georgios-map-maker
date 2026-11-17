@@ -5,11 +5,14 @@
 
 import { PX_PER_SQUARE } from "../assets/model";
 import { parseVector2, parseVector2Array, type Vec2 } from "../ddmap/godot";
+import type { Shelter } from "../gen/layout";
 
 /** Foundry wall sense values (CONST.WALL_SENSE_TYPES): none 0, limited 10, normal 20. */
 const SENSE = { NONE: 0, LIMITED: 10, NORMAL: 20 } as const;
 /** Foundry door types (CONST.WALL_DOOR_TYPES): none 0, door 1, secret 2. */
 const DOOR = { NONE: 0, DOOR: 1 } as const;
+/** Lamps and fires shine once the scene is at least this dark (dawn, dusk and night on the module's clock). */
+export const LAMPS_LIT_FROM = 0.25;
 /** Foundry door states (CONST.WALL_DOOR_STATES). */
 const DOOR_STATE = { closed: 0, open: 1, locked: 2 } as const;
 
@@ -46,7 +49,7 @@ export interface FoundryWall {
 export interface FoundryLight {
   x: number;
   y: number;
-  config: { dim: number; bright: number; color: string; alpha: number; attenuation?: number; luminosity?: number; animation?: { type: string; speed: number; intensity: number } };
+  config: { dim: number; bright: number; color: string; alpha: number; attenuation?: number; luminosity?: number; animation?: { type: string; speed: number; intensity: number }; darkness: { min: number; max: number } };
   flags: Record<string, unknown>;
 }
 
@@ -60,6 +63,8 @@ export interface FoundrySceneData {
   darkness: number;
   walls: FoundryWall[];
   lights: FoundryLight[];
+  /** Where the weather stays out, as Foundry polygon points (x, y, x, y...); holes cut open sky out. The module makes one Suppress Weather region of them. */
+  sheltered: Array<{ points: number[]; hole?: boolean }>;
   notes: string;
 }
 
@@ -74,6 +79,8 @@ export interface SceneOptions {
   doors?: Record<string, DoorMeta>;
   /** Wall node ids drawn only for looks (quay and pier edges): no Foundry walls for them. */
   decorative?: Set<string>;
+  /** Roofed ground in squares (GeneratedVersion.sheltered). */
+  sheltered?: Shelter[];
 }
 
 function argbToHex(argb: string): string {
@@ -167,6 +174,8 @@ export function toFoundryScene(map: Record<string, any>, opts: SceneOptions): Fo
         attenuation: fire ? 0.75 : 0.6,
         luminosity: 0.45,
         ...(fire ? { animation: { type: "torch", speed: 3, intensity: 3 } } : {}),
+        // Off by day: the clock darkens the scene at dusk and they come on.
+        darkness: { min: LAMPS_LIT_FROM, max: 1 },
       },
       flags: { "georgios-map-maker": { light: l.node_id } },
     };
@@ -182,6 +191,19 @@ export function toFoundryScene(map: Record<string, any>, opts: SceneOptions): Fo
     darkness: Math.round(Math.max(0, Math.min(1, 1 - lum)) * 100) / 100,
     walls,
     lights,
+    sheltered: (opts.sheltered ?? []).map((sh) => ({ points: polygonPoints(sh.points, opts.pps), ...(sh.hole ? { hole: true } : {}) })).filter((sh) => sh.points.length >= 6),
     notes: opts.credit ?? "Map assets: 2-Minute Tabletop (CC BY-NC 4.0). Built with Georgios' Map Maker.",
   };
+}
+
+/** A ring in squares as Foundry polygon points in scene pixels, without repeated corners (Foundry refuses zero-length edges). */
+function polygonPoints(ring: Array<[number, number]>, pps: number): number[] {
+  const pts: Array<[number, number]> = [];
+  for (const [x, y] of ring) {
+    const p: [number, number] = [Math.round(x * pps), Math.round(y * pps)];
+    const last = pts[pts.length - 1];
+    if (!last || last[0] !== p[0] || last[1] !== p[1]) pts.push(p);
+  }
+  while (pts.length > 1 && pts[0]![0] === pts[pts.length - 1]![0] && pts[0]![1] === pts[pts.length - 1]![1]) pts.pop();
+  return pts.flat();
 }

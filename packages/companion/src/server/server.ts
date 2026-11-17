@@ -101,6 +101,12 @@ export class CompanionServer {
         const info = await s.refreshCity(String(p.city));
         return { ...info, imagePath: `/city/${info.key}.webp` };
       }
+      case "city.night": {
+        // Draws (or finds) the city's night image; the module fetches it from imagePath.
+        if (!/^[0-9a-f]{8,40}$/.test(String(p.city))) throw new Error("bad city key");
+        await s.cityNightImage(String(p.city));
+        return { key: String(p.city), imagePath: `/city/${p.city}.night.webp` };
+      }
       case "city.places": {
         if (!/^[0-9a-f]{8,40}$/.test(String(p.city))) throw new Error("bad city key");
         return { hotspots: await s.cityPlaces(String(p.city)) };
@@ -218,9 +224,9 @@ export class CompanionServer {
         res.writeHead(200, { "content-type": "image/webp", "cache-control": "no-store" });
         return void res.end(img);
       }
-      const cm = /^\/city\/([0-9a-f]{8,40})\.webp$/.exec(url.pathname);
+      const cm = /^\/city\/([0-9a-f]{8,40})(\.night)?\.webp$/.exec(url.pathname);
       if (req.method === "GET" && cm) {
-        const img = await this.o.store.cityImage(cm[1]!);
+        const img = cm[2] ? await this.o.store.cityNightImage(cm[1]!) : await this.o.store.cityImage(cm[1]!);
         res.writeHead(200, { "content-type": "image/webp", "cache-control": "no-store" });
         return void res.end(img);
       }

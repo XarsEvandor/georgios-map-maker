@@ -15,6 +15,7 @@ import type { Placed } from "./dress";
 import type { Layout, LayoutZone } from "./layout";
 import { Rng } from "./rng";
 import { TRADES, type Trade } from "../city/shops";
+import { RECIPE_BY_TYPE } from "./recipes";
 
 export type PersonKind = "commoner" | "noble" | "guard" | "knight" | "veteran" | "thug" | "priest" | "acolyte" | "mage" | "apprentice" | "minstrel";
 
@@ -90,6 +91,20 @@ const AT_TABLES: Record<string, Folk> = {
 const SEAT_TYPES = new Set(["chair", "stool", "bench", "armchair", "sofa"]);
 /** The trade whose main room this is (a counter there gets its keeper). */
 const TRADE_OF_ROOM = new Map((Object.entries(TRADES) as Array<[Trade, (typeof TRADES)[Trade]]>).map(([t, info]) => [info.room, t]));
+/**
+ * Where each trade's keeper works: the counter, or in a room without one (the services, crafts
+ * and dens) the room's first essential piece: the alchemist's station, the tanner's vats, the
+ * brewer's kettle, the alewife's bar, the healer's beds, the gaoler's table.
+ */
+const WORK_AT = new Map([...TRADE_OF_ROOM.keys()].map((room) => {
+  const steps = (RECIPE_BY_TYPE.get(room)?.steps ?? []) as Array<{ id: string; essential?: boolean }>;
+  return [room, steps.some((st) => st.id === "counter") ? "counter" : steps.find((st) => st.essential)?.id ?? "counter"];
+}));
+/** Who keeps a trade, when not a commoner. */
+const KEEPER_KIND: Partial<Record<Trade, PersonKind[]>> = {
+  armourer: ["veteran"], jeweller: ["noble"], moneylender: ["noble"], fence: ["thug"], thieves_den: ["thug"], smugglers_den: ["thug"],
+  healer: ["acolyte", "priest"], alchemist: ["mage", "apprentice"], gaol: ["guard"], watch_house: ["veteran", "guard"],
+};
 const BED_TYPES = new Set(["bed_single", "bed_double", "cot", "mat"]);
 
 interface Box { p: Placed; cx: number; cy: number; ux: number; uy: number; hw: number; hh: number }
@@ -395,22 +410,25 @@ export function placePeople(inp: PeopleInput): Person[] {
       }
     }
     // Shops (street maps show houses from inside): the keeper behind the counter, the smith at the
-    // anvil, the carpenter at the bench; a customer or two in front by day. Shut at night.
+    // anvil, the carpenter at the bench, the others at their room's main piece (WORK_AT); a
+    // customer or two in front of a counter by day. Shut at night.
     if (time !== "night") {
-      const work = inp.placed.filter((p) => !!p.room && TRADE_OF_ROOM.has(p.room) && (p.feature === "counter" || (p.room === "shop.blacksmith" && p.feature === "anvil") || (p.room === "shop.carpenter" && p.feature === "bench")));
+      // Only the shop's own room: a gambling den's contraband store is not a smugglers' den.
+      const work = inp.placed.filter((p) => !!p.trade && !!p.room && (p.feature === WORK_AT.get(p.room) || (p.room === "shop.blacksmith" && p.feature === "anvil") || (p.room === "shop.carpenter" && p.feature === "bench")));
       const served = new Set<string>();
+      const keeperKind = (trade: Trade): PersonKind => { const kinds = KEEPER_KIND[trade]; return kinds ? rng.pick(kinds) : "commoner"; };
       for (const p of work) {
-        const trade = TRADE_OF_ROOM.get(p.room!)!;
+        const trade = p.trade as Trade;
         if (served.has(p.key.split("/")[0]!)) continue;
         const b = boxOf(p);
         const home = houses.find((hs) => inPoly([b.cx, b.cy], hs));
         if (!home) continue;
         const keeper = TRADES[trade]?.keeper ?? "shopkeeper";
-        const kind: PersonKind = trade === "armourer" ? "veteran" : trade === "jeweller" || trade === "moneylender" ? "noble" : trade === "fence" ? "thug" : "commoner";
+        const kind = keeperKind(trade);
         const { f, depth, across, length } = frontOf(b);
         const offs = [0, 0.6, -0.6, 1.2, -1.2].filter((o) => Math.abs(o) <= Math.max(0, length - 0.3));
         let done = false;
-        if (p.feature === "counter") {
+        if (p.feature === "counter" || p.type === "counter") {
           for (const tol of [0.3, 0.05]) for (const d of [0.5, 0.75, 1]) for (const o of offs) {
             const q = add(add([b.cx, b.cy], f, -(depth + d)), across, o);
             if (!done && free(q, { ignore: p, tol, indoors: home })) done = add1(kind, keeper, q, f);
@@ -428,6 +446,25 @@ export function placePeople(inp: PeopleInput): Person[] {
         for (let k2 = 0, n = p.feature === "counter" ? rng.int(0, time === "day" ? 2 : 1) : 0; k2 < n; k2++) {
           const q = add(add([b.cx, b.cy], f, depth + rng.range(0.6, 1)), across, rng.range(-0.8, 0.8));
           if (free(q, { ignore: p, indoors: home })) add1(mix([["commoner", 80], ["noble", 8], ["guard", 6], ["acolyte", 6]]), "customer", q, [-f[0], -f[1]]);
+        }
+      }
+    }
+    // Keepers with no room at their work piece (a crowded bar, beds close together): beside any
+    // piece of their room that has a free spot.
+    if (time !== "night") {
+      const kept = new Set(people.filter((pp) => Object.values(TRADES).some((t) => t.keeper === pp.role)).map((pp) => houses.findIndex((hs) => inPoly([pp.x, pp.y], hs))));
+      for (const p of inp.placed) {
+        if (!p.trade) continue;
+        const b = boxOf(p);
+        const hi = houses.findIndex((hs) => inPoly([b.cx, b.cy], hs));
+        if (hi < 0 || kept.has(hi)) continue;
+        const trade = p.trade as Trade;
+        for (let i = 0; i < 12; i++) {
+          const a = (i * Math.PI) / 6, r = Math.max(b.hw, b.hh) + 0.6;
+          const q: V = [b.cx + Math.cos(a) * r, b.cy + Math.sin(a) * r];
+          if (!free(q, { ignore: p, indoors: houses[hi] })) continue;
+          const kinds = KEEPER_KIND[trade];
+          if (add1(kinds ? rng.pick(kinds) : "commoner", TRADES[trade].keeper, q, towards(q, [b.cx, b.cy]))) { kept.add(hi); break; }
         }
       }
     }
@@ -454,17 +491,8 @@ export function placePeople(inp: PeopleInput): Person[] {
         add1(mix(f.kinds), f.role, seat, (p.facing ?? [0, 1]) as V);
       }
     }
-    // The healer at a patient's bedside; bathers in the tubs by day.
+    // Bathers in the tubs by day (the healer at the bedside is the infirmary's keeper, above).
     if (time !== "night") {
-      for (const p of inp.placed.filter((x) => BED_TYPES.has(x.type) && room(x) === "service.infirmary").slice(0, 1)) {
-        const b = boxOf(p);
-        const home = houses.find((hs) => inPoly([b.cx, b.cy], hs));
-        for (let i = 0; i < 12 && home; i++) {
-          const a = (i * Math.PI) / 6, r = Math.max(b.hw, b.hh) + 0.5;
-          const q: V = [b.cx + Math.cos(a) * r, b.cy + Math.sin(a) * r];
-          if (free(q, { ignore: p, indoors: home })) { add1(rng.next() < 0.6 ? "acolyte" : "priest", "healer", q, towards(q, [b.cx, b.cy])); break; }
-        }
-      }
       for (const p of inp.placed.filter((x) => x.type === "bathtub" && room(x) === "service.bath")) {
         const b = boxOf(p);
         if (rng.next() < 0.35 && spaced([b.cx, b.cy], 0.7) && take(p)) add1(mix([["commoner", 6], ["noble", 2]]), "bather", [b.cx, b.cy], (p.facing ?? [0, 1]) as V);

@@ -51,6 +51,8 @@ export interface Placed {
   locked?: boolean;
   /** Street maps: the type of the room inside a building the piece stands in (city/interiors.ts). */
   room?: string;
+  /** Street maps: the trade whose shop this is, on the pieces of the building's main room only. */
+  trade?: string;
 }
 
 export interface PathPlan {
@@ -268,9 +270,27 @@ function restyleFor(ctx: Ctx, zone: string, role: string): Style | undefined {
 }
 
 /** Picks a piece for a role from the style's pool; undefined when forbidden or none exists. */
+/** Fires burn: a hearth, oven or forge is drawn lit when the style has lit art for it (and gives light). */
+const FIRES = new Set(["fireplace", "oven", "forge", "firepit", "brazier", "campfire"]);
+const ODD_FIRE = /crystal|skull|green|blue|rose|broken|unlit|pyre|stall/i;
+
+/** Plain lit pieces of a fire role from any pack (no crystal, skulls or coloured flame), for styles whose packs have none. */
+function litFires(ctx: Ctx, role: string, q: Partial<PoolQuery>, maxArea = Infinity): AssetRecord[] {
+  return ctx.cat.ofRole(role).filter((a) => a.tag?.lit && !ODD_FIRE.test(a.name)
+    && (!q.maxSide || Math.max(...(a.footprint ?? [1, 1])) <= q.maxSide)
+    && (!q.placement || q.placement.includes(a.tag?.placement ?? "free"))
+    && (a.footprint ?? [1, 1])[0] * (a.footprint ?? [1, 1])[1] <= maxArea);
+}
+
 function pick(ctx: Ctx, zone: string, role: string, q: Partial<PoolQuery> = {}, rng = ctx.rng): AssetRecord | undefined {
   if (forbidden(ctx, zone, role)) return undefined;
   const style = restyleFor(ctx, zone, role) ?? ctx.style;
+  if (FIRES.has(role) && q.lit === undefined) {
+    const lit = poolFor(ctx.cat, style, role, { genre: ctx.plan.genre, wear: ctx.wear, ...q, lit: true });
+    if (lit.length) return rng.pick(lit);
+    const any = litFires(ctx, role, q);
+    if (any.length) return rng.pick(any);
+  }
   const pool = poolFor(ctx.cat, style, role, { genre: ctx.plan.genre, wear: ctx.wear, ...q });
   if (!pool.length) return undefined;
   return rng.pick(pool);
@@ -341,7 +361,8 @@ function place(ctx: Ctx, p0: Put): Placed | undefined {
   const off = rotate([ao[0] * st, ao[1]], rot);
   const pos: Vec = [p.at[0] - off[0] * scale, p.at[1] - off[1] * scale];
   let light: LightRule | undefined;
-  if (p.light !== false) light = p.light ?? (p.asset.tag?.lit ? LIGHTS[p.role] ?? LIGHTS[p.asset.tag.role] ?? { range: 3, color: "ffffcf8a", intensity: 0.8 } : undefined);
+  // Glowing fungi (a magic shop's planters) are not lights.
+  if (p.light !== false) light = p.light ?? (p.asset.tag?.lit && !/fungi/i.test(p.asset.name) ? LIGHTS[p.role] ?? LIGHTS[p.asset.tag.role] ?? { range: 3, color: "ffffcf8a", intensity: 0.8 } : undefined);
   const placed: Placed = {
     key: p.key ?? nextKey(ctx, `${p.zone}/${p.feature}`),
     zone: p.zone,
@@ -883,6 +904,13 @@ function runAnchor(ctx: Ctx, room: Room, step: AnchorStep, directive?: string): 
       const whole = poolFor(ctx.cat, style, role, { genre: ctx.plan.genre, wear: "lived-in", placement: ["wall", "free", "corner"], composite: step.composite }).filter((a) => a.footprint![0] * a.footprint![1] <= maxArea);
       if (whole.length) first = ctx.rng.pick(whole);
     }
+    if (first && FIRES.has(role) && !first.tag?.lit) {
+      const q = { genre: ctx.plan.genre, wear: "lived-in" as Wear, placement: ["wall", "free", "corner"], composite: step.composite };
+      const style = restyleFor(ctx, zone, role) ?? ctx.style;
+      const lit = poolFor(ctx.cat, style, role, { ...q, lit: true }).filter((a) => a.footprint![0] * a.footprint![1] <= maxArea);
+      const any = lit.length ? lit : litFires(ctx, role, q, maxArea);
+      if (any.length) first = ctx.rng.pick(any);
+    }
     if (!first) continue;
     tries.push({ role, asset: first });
     const style = restyleFor(ctx, zone, role) ?? ctx.style;
@@ -1207,20 +1235,42 @@ function runDecals(ctx: Ctx, room: Room, step: DecalsStep | ScatterStep, mult: n
 
 function runSconces(ctx: Ctx, room: Room, step: SconcesStep): void {
   const zone = room.zone.id;
-  const role = step.roles.find((r) => !forbidden(ctx, zone, r) && (pick(ctx, zone, r, { placement: ["wallmount"] }) || pick(ctx, zone, r, { lit: true, maxSide: 1 })));
-  if (!role) return;
-  const a = pick(ctx, zone, role, { placement: ["wallmount"] }) ?? pick(ctx, zone, role, { lit: true, maxSide: 1 })!;
+  let role = step.roles.find((r) => !forbidden(ctx, zone, r) && (pick(ctx, zone, r, { placement: ["wallmount"] }) || pick(ctx, zone, r, { lit: true, maxSide: 1 })));
+  let a = role ? pick(ctx, zone, role, { placement: ["wallmount"] }) ?? pick(ctx, zone, role, { lit: true, maxSide: 1 }) : undefined;
+  // The style's packs have none of these lights: a plain lit one from any pack, wall-mounted or small.
+  if (!a) for (const r of step.roles) {
+    if (forbidden(ctx, zone, r)) continue;
+    const any = ctx.cat.ofRole(r).filter((x) => x.tag?.lit && !ODD_FIRE.test(x.name) && (x.tag?.placement === "wallmount" || Math.max(...(x.footprint ?? [1, 1])) <= 1));
+    if (any.length) { role = r; a = ctx.rng.pick(any); break; }
+  }
+  if (!role || !a) return;
   const wallMounted = a.tag?.placement === "wallmount";
+  const { depth } = frontSize(a);
+  const put = (s: WallSide, t: number, force = false) => place(ctx, { asset: a, role, at: sidePoint(s, t, wallMounted ? depth / 2 - INSET * 0.8 : depth / 2 + 0.05), rot: rotationFor(a, s.inward), layer: wallMounted ? LAYER.overhead : LAYER.surface, zone, feature: step.id, occupy: wallMounted || force ? "force" : "clutter", light: LIGHTS[role] ?? LIGHTS.sconce });
+  // Inside the building: an L-shaped building's room box can reach past its real walls (the mask marks that as wall).
+  const within = (s: WallSide, t: number) => ctx.grid.fits(rectAt(sidePoint(s, t, 0.7), [0.25, 0.25]), (c) => c !== Cell.Wall);
+  const clear = (s: WallSide, t: number) => !s.doors.some((d) => Math.abs(d - t) < 1.1) && !s.windows.some((w) => Math.abs(w - t) < 0.8) && within(s, t);
+  let lit = 0;
   for (const s of room.sides) {
     const n = Math.floor(s.length / step.every);
     for (let i = 0; i < n; i++) {
       const t = (i + 0.5) * (s.length / n) + ctx.rng.range(-0.3, 0.3);
-      if (s.doors.some((d) => Math.abs(d - t) < 1.1) || s.windows.some((w) => Math.abs(w - t) < 0.8)) continue;
-      const { depth } = frontSize(a);
-      const at = sidePoint(s, t, wallMounted ? depth / 2 - INSET * 0.8 : depth / 2 + 0.05);
-      place(ctx, { asset: a, role, at, rot: rotationFor(a, s.inward), layer: wallMounted ? LAYER.overhead : LAYER.surface, zone, feature: step.id, occupy: wallMounted ? "force" : "clutter", light: LIGHTS[role] ?? LIGHTS.sconce });
+      if (clear(s, t) && put(s, t)) lit++;
     }
   }
+  // A room too small for the spacing still gets one light: on its longest wall, clear of doors and windows.
+  if (lit) return;
+  const spots: Array<[WallSide, number]> = [];
+  for (const s of [...room.sides].sort((p, q) => q.length - p.length)) {
+    if (s.length < 1.2) continue;
+    for (const k of [0.5, 0.3, 0.7, 0.15, 0.85]) if (clear(s, k * s.length)) spots.push([s, k * s.length]);
+  }
+  if (!spots.length) for (const s of [...room.sides].sort((p, q) => q.length - p.length)) {
+    for (const k of [0.5, 0.3, 0.7, 0.15, 0.85]) if (s.length >= 1.2 && !s.doors.some((d) => Math.abs(d - k * s.length) < 0.9) && within(s, k * s.length)) spots.push([s, k * s.length]);
+  }
+  if (spots.some(([s, t]) => put(s, t))) return;
+  // The walls are lined with furniture: the candle or lantern stands on it (drawn above it).
+  if (spots.length) put(spots[0]![0], spots[0]![1], true);
 }
 
 function runOverhead(ctx: Ctx, room: Room, step: OverheadStep): void {

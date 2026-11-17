@@ -105,6 +105,9 @@ function actorFor(stat) {
 }
 
 /** Puts the map's townsfolk on its scene, replacing any placed before. Returns how many. */
+/** Bumped when townsfolk are placed differently; maps placed before get theirs again on the GM's next look. 2: every trade's keeper (services, crafts, dens). */
+export const PEOPLE_LOOK = 2;
+
 export async function populate(c, scene) {
   const mapId = scene.getFlag(MODULE_ID, "mapId");
   if (!mapId) return 0;
@@ -143,7 +146,7 @@ export async function populate(c, scene) {
     console.error(`${MODULE_ID} | townsfolk tokens on ${scene.name}`, e, docs[0]);
     throw e;
   }
-  await scene.setFlag(MODULE_ID, "people", docs.length);
+  await scene.update({ [`flags.${MODULE_ID}.people`]: docs.length, [`flags.${MODULE_ID}.peopleLook`]: PEOPLE_LOOK });
   return docs.length;
 }
 

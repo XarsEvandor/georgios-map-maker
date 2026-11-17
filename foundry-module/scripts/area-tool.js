@@ -16,7 +16,7 @@ const GOLD = 0xe0a92e;
  * Registers the layer (call during init).
  * @param {{ openPanel: () => void, onArea: (scene: Scene, rect: {x: number, y: number, w: number, h: number}) => Promise<void>, t: (key: string) => string }} opts
  */
-export function registerAreaTool({ openPanel, onArea, t }) {
+export function registerAreaTool({ openPanel, onArea, t, openCompanions }) {
   const InteractionLayer = foundry.canvas.layers.InteractionLayer;
 
   class GeorgiosLayer extends InteractionLayer {
@@ -44,6 +44,7 @@ export function registerAreaTool({ openPanel, onArea, t }) {
         tools: {
           georgiosArea: { name: "georgiosArea", order: 0, title: t("AreaTool"), icon: "fa-solid fa-vector-square", visible: true },
           georgiosMapMaker: { name: "georgiosMapMaker", order: 1, title: t("Open"), icon: "fa-solid fa-dungeon", button: true, visible: true, onChange: () => openPanel() },
+          georgiosCompanions: { name: "georgiosCompanions", order: 9, title: t("Launcher.Title"), icon: "fa-solid fa-power-off", button: true, visible: true, onChange: () => openCompanions?.() },
         },
       };
     }

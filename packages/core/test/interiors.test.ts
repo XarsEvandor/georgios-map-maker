@@ -1,7 +1,7 @@
 /** Buildings seen from inside on street maps (city/interiors.ts, city/street.ts). */
 
 import { describe, expect, it } from "vitest";
-import { allHotSpots, buildStyles, Catalog, furnishBuilding, generate, hotspotPlan, parseCity, parseVector2Array, PX_PER_SQUARE, Rng, TRADES, type Placed, type ScenePlan } from "../src/index";
+import { allHotSpots, buildStyles, Catalog, furnishBuilding, generate, hotspotPlan, LAMPS_LIT_FROM, parseCity, parseVector2Array, PX_PER_SQUARE, Rng, toFoundryScene, TRADES, type Placed, type ScenePlan } from "../src/index";
 import { testIndex, townJson } from "./fixtures";
 
 type V = [number, number];
@@ -59,6 +59,19 @@ describe("furnishing one building", () => {
     expect(keep.rooms.length).toBeGreaterThanOrEqual(6);
     expect(keep.floor).toBe("stone");
   });
+
+  it("lights every room for the night, however small, and its hearth burns", () => {
+    const small = furnishBuilding({ key: "h3", shape: [[2, 2], [6, 2], [6, 5], [2, 5]], door: [4, 2], kind: "house", plan, cat, style, zone: "streets" });
+    expect(small.placed.some((p) => p.light)).toBe(true);
+    // Every room of the L-shaped house and the keep has a light inside the walls; only the locked strongroom (gothic.vault) stays dark.
+    const keep = furnishBuilding({ key: "k2", shape: [[0, 0], [30, 0], [30, 26], [0, 26]], door: [15, 26], kind: "keep", plan, cat, style, zone: "streets" });
+    for (const b of [home, keep]) {
+      const lit = new Set(b.placed.filter((p) => p.light).map((p) => p.key.split("/")[1]));
+      const rooms = new Set(b.placed.filter((p) => p.room !== "gothic.vault").map((p) => p.key.split("/")[1]));
+      expect([...rooms].filter((r) => !lit.has(r)), "rooms without a light").toEqual([]);
+    }
+    for (const p of [...home.placed, ...small.placed, ...keep.placed]) if (/^(fireplace|oven|forge)$/.test(p.type)) expect(p.light, p.key).toBeTruthy();
+  });
 });
 
 describe("street maps from inside", () => {
@@ -91,6 +104,28 @@ describe("street maps from inside", () => {
   it("gives the houses windows", () => {
     expect(Object.values(v.elements).filter((e) => e.kind === "window").length).toBeGreaterThan(0);
     expect(v.summary.windows).toBeGreaterThan(0);
+  });
+
+  it("lights the streets at night: torches by public doors, braziers on the market, street lamps seven squares or more apart", () => {
+    const out = v.placed.filter((x) => x.light && !x.key.startsWith("house#"));
+    const feats = new Set(out.map((x) => x.feature));
+    expect(feats.has("door_lights")).toBe(true);
+    expect(feats.has("market_fires")).toBe(true);
+    const lamps = out.filter((x) => x.feature === "street_lights").map((x) => x.center ?? [x.x, x.y]);
+    expect(lamps.length).toBeGreaterThan(2);
+    for (const [i, a] of lamps.entries()) for (const b of lamps.slice(i + 1)) expect(Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!)).toBeGreaterThanOrEqual(7 - 1e-6);
+    // Torches sit by doors, not by every home's door.
+    const homes = Object.values(v.elements).filter((e) => e.kind === "door" && /^door:house#a?\d+$/.test(e.key)).length;
+    expect(out.filter((x) => x.feature === "door_lights").length).toBeLessThan(homes * 2);
+  });
+
+  it("keeps its lamps by day, and Foundry lights them from dusk (the clock)", () => {
+    expect(p.mood?.time).toBe("day");
+    const lamps = level(v).lights;
+    expect(lamps.length).toBeGreaterThan(0);
+    const scene = toFoundryScene(v.map, { name: "t", pps: 70 });
+    expect(scene.lights.length).toBe(lamps.length);
+    for (const l of scene.lights) expect(l.config.darkness).toEqual({ min: LAMPS_LIT_FROM, max: 1 });
   });
 });
 

@@ -78,6 +78,26 @@ export interface Layout {
   approach?: Rect;
 }
 
+/**
+ * Ground under a roof (or underground) in squares, where the weather stays out. A `hole` cuts
+ * open sky out of the other shapes.
+ */
+export interface Shelter {
+  points: Array<[number, number]>;
+  hole?: boolean;
+}
+
+/**
+ * Where the weather stays out of a building map: the building, or for an enclosed one (part of
+ * a castle or a dungeon) everything but the approach.
+ */
+export function shelterOf(layout: Layout): Shelter[] {
+  const box = (r: Rect): Array<[number, number]> => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
+  if (layout.approach) return [{ points: box({ x: 0, y: 0, w: layout.map.w, h: layout.map.h }) }, { points: box(layout.approach), hole: true }];
+  if (layout.outline.length < 3) return [];
+  return [{ points: layout.outline.map(([x, y]) => [x, y] as [number, number]) }];
+}
+
 const SIDES: Side[] = ["north", "east", "south", "west"];
 /** Width of a gate's frame art over its opening (features.ts GATE_ARTS). */
 export const GATE_FRAME_RATIO = 1.75;

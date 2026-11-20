@@ -48,7 +48,8 @@ const out = {
   scene: { name: "Ogeia (world map)", width: scene.width, height: scene.height, src: scene.background.src, grid: scene.grid },
   journals, pins,
 };
-const target = "C:/Users/giorg/AppData/Local/FoundryVTT/Data/georgios-map-maker/ogeia-import.json";
+// Into Foundry's data folder (FOUNDRY_DATA, else the Windows default under %LOCALAPPDATA%).
+const target = require("path").join(process.env.FOUNDRY_DATA ?? require("path").join(process.env.LOCALAPPDATA ?? "", "FoundryVTT", "Data"), "georgios-map-maker", "ogeia-import.json");
 fs.writeFileSync(target, JSON.stringify(out));
 const byFolder = {};
 for (const j of journals) byFolder[j.folder] = (byFolder[j.folder] ?? 0) + 1;

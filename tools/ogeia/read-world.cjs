@@ -1,7 +1,12 @@
 // Reads the COPIED Wallachia LevelDB folders (never the live world) with Foundry's own classic-level.
 const { ClassicLevel } = require("C:/Program Files/Foundry Virtual Tabletop/resources/app/node_modules/classic-level");
 const fs = require("fs");
-const base = "C:/Users/giorg/AppData/Local/Temp/claude/03d9be09856c09a0/3f8cccea-bd6e-4cee-91c7-f8db7aabef02/scratchpad/wallachia-copy";
+// The folder that holds the copied LevelDB folders: node read-world.cjs <folder>
+const base = process.argv[2];
+if (!base) {
+  console.error("usage: node read-world.cjs <folder with copied LevelDB folders>");
+  process.exit(1);
+}
 const out = {};
 (async () => {
   for (const name of fs.readdirSync(base)) {

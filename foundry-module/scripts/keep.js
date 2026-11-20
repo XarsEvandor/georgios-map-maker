@@ -4,7 +4,8 @@
  * GM had played from a placeholder (moved into a house, renamed, linked to an actor) was lost with
  * the rest. Now, for each old token:
  * - kept as it is: the GM moved it (Map Maker records where it put each token; nothing else moves
- *   townsfolk), renamed it (and no other module has taken the token over), or linked it to an actor;
+ *   townsfolk), renamed it (a token another module has taken over counts as renamed only once its
+ *   name has lost the "<given>, <role>" shape such modules keep), or linked it to an actor;
  * - reused in place: it is the same placeholder as one about to be placed (same name), so whatever
  *   another module made of it stays;
  * - removed: an untouched placeholder the new placement no longer has.
@@ -33,7 +34,9 @@ export function keepReason(tk) {
   if (tk.actorLink) return "linked";
   const foreign = Object.keys(tk.flags ?? {}).some((k) => k !== OWN && k !== "core");
   const renamed = placed?.name ? tk.name !== placed.name : !looksPlaceholder(tk.name, f.role);
-  if (renamed && !foreign) return "renamed";
+  // A module that recasts placeholders keeps their shape ("Tokk, dockworker"); a name without it
+  // ("Alice") is the GM's, whatever else has touched the token.
+  if (renamed && (!foreign || !looksPlaceholder(tk.name, f.role))) return "renamed";
   return null;
 }
 

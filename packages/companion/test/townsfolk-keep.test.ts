@@ -21,6 +21,8 @@ describe("townsfolk the GM played survive Map Maker placing them again", () => {
     expect(keepReason(tok("c", "Old Hugh", "patron"))).toBe("renamed");
     // Renamed by another module that recasts placeholders: that module's business, not kept.
     expect(keepReason(tok("d", "Tokk of the Lampless Stair, dockworker", "dockworker", { placed: { x: 0, y: 0, name: "Alys, dockworker" }, other: true }))).toBe(null);
+    // ...but once the GM renames it out of that shape, it is the GM's.
+    expect(keepReason(tok("d2", "Old Mother Gervoise", "patron", { other: true }))).toBe("renamed");
     // Linked to an actor: someone.
     expect(keepReason(tok("e", "Galauche Greymane, barkeep", "barkeep", { actorLink: true, other: true }))).toBe("linked");
     expect(keepReason(tok("f", "Hugh, patron", "patron", { placed: { x: 0, y: 0, name: "Hugh, patron" } }))).toBe(null);

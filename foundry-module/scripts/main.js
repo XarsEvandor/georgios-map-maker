@@ -84,6 +84,7 @@ async function buildScene(c, mapId, versionId, opts = {}) {
   await setShelter(scene, exported.scene.sheltered);
   // The export carries the map's own darkness; the clock sets every scene's.
   await syncScenes();
+  if (canvas?.scene?.id === scene.id) dropStrayRegionHighlights();
   if (!opts.quiet) ui.notifications.info(`${t("SceneBuilt")}: ${scene.name}`);
   return scene;
 }
@@ -104,7 +105,21 @@ async function setShelter(scene, sheltered) {
     behaviors: [{ type: "suppressWeather", name: t("NoWeatherIndoors") }],
     flags: { [MODULE_ID]: { sheltered: true } },
   }]);
+  if (canvas?.scene?.id === scene.id) setTimeout(dropStrayRegionHighlights, 50);
 }
+
+/**
+ * Foundry 14 leaves a stray highlight behind when a scene is rebuilt with its region replaced: a
+ * grey copy of the "Indoors" region over every building, for the GM, until the page reloads. The
+ * highlights of regions no longer on the layer go.
+ */
+function dropStrayRegionHighlights() {
+  const highlights = canvas?.regions?._highlights;
+  if (!highlights?.children) return;
+  const live = new Set(canvas.regions.placeables);
+  for (const m of [...highlights.children]) if (m.region && !live.has(m.region)) m.destroy({ children: true });
+}
+Hooks.on("canvasReady", () => setTimeout(dropStrayRegionHighlights, 0));
 
 /** Maps built before the weather: their roofs (setShelter) from the companion, without building them again. */
 async function ensureRoofs(scene, c = client()) {

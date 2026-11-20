@@ -40,7 +40,8 @@ describe("townsfolk the GM played survive Map Maker placing them again", () => {
     ];
     const fresh = [person("Alys", "dockworker"), person("Hugh", "dockworker"), person("Ida", "sailor"), person("Reynard", "sailor")];
     const plan = reconcile(old, fresh);
-    expect(plan.keep).toEqual([{ id: "alys", reason: "moved" }, { id: "hugh", reason: "renamed" }]);
+    // Alys stands for her own placeholder; Old Hugh, a patron, has no patron left to stand for.
+    expect(plan.keep).toEqual([{ id: "alys", reason: "moved", index: 0 }, { id: "hugh", reason: "renamed" }]);
     expect(plan.reuse).toEqual([{ id: "tokk", index: 1 }, { id: "ida", index: 2 }]);
     expect(plan.drop).toEqual(["odo"]);
     // Alys is kept where the GM put her, so no second "Alys, dockworker" appears on the street.
@@ -51,7 +52,34 @@ describe("townsfolk the GM played survive Map Maker placing them again", () => {
     // Galauche: a written person's token from before the placement record, still behind the bar.
     const old = [tok("galauche", "Galauche Greymane, barkeep", "barkeep", { x: 439, y: 1210, actorLink: true, other: true })];
     const fresh = [{ ...person("Alys", "barkeep"), px: 439, py: 1210 }, { ...person("Hugh", "patron"), px: 439, py: 1210 }, { ...person("Ida", "barkeep"), px: 900, py: 900 }];
-    expect(reconcile(old, fresh, { near: 35 }).create).toEqual([1, 2]);
-    expect(reconcile(old, fresh).create).toEqual([0, 1, 2]);
+    const plan = reconcile(old, fresh);
+    expect(plan.keep).toEqual([{ id: "galauche", reason: "linked", index: 0 }]);
+    expect(plan.create).toEqual([1, 2]);
+  });
+
+  it("places no second keeper when the shop's counter moved away from the GM's keeper", () => {
+    // Mekka, the alchemist Nemesis wrote, linked, from before the placement record. The rebuilt
+    // shop puts its one alchemist three squares off, behind the new counter.
+    const old = [
+      tok("mekka", "Mekka Clutch Ninth, alchemist", "alchemist", { x: 619, y: 725, actorLink: true, other: true }),
+      tok("lambert", "Lambert, dockworker", "dockworker", { x: 1574, y: 162, placed: { x: 1574, y: 162, name: "Lambert, dockworker" } }),
+    ];
+    const fresh = [{ ...person("Ursula", "alchemist"), px: 819, py: 650 }, { ...person("Lambert", "dockworker"), px: 1500, py: 200 }, { ...person("Rohese", "dockworker"), px: 354, py: 575 }];
+    const plan = reconcile(old, fresh);
+    expect(plan.keep).toEqual([{ id: "mekka", reason: "linked", index: 0 }]);
+    expect(plan.reuse).toEqual([{ id: "lambert", index: 1 }]);
+    expect(plan.create).toEqual([2]);
+  });
+
+  it("lets two keepers of a trade stand for the two nearest spots, and places the third", () => {
+    const old = [
+      tok("a", "Odo the Elder", "smith", { x: 100, y: 100, actorLink: true }),
+      tok("b", "Bertha", "smith", { x: 900, y: 900, placed: { x: 880, y: 900, name: "Bertha, smith" } }),
+    ];
+    const fresh = [{ ...person("Ida", "smith"), px: 950, py: 950 }, { ...person("Hugh", "smith"), px: 120, py: 100 }, { ...person("Reynard", "smith"), px: 500, py: 500 }];
+    const plan = reconcile(old, fresh);
+    // Bertha was moved and has no fresh namesake: she takes the spot nearest her, as Odo does his.
+    expect(plan.keep).toEqual([{ id: "a", reason: "linked", index: 1 }, { id: "b", reason: "moved", index: 0 }]);
+    expect(plan.create).toEqual([2]);
   });
 });

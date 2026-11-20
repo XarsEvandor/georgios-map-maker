@@ -120,8 +120,18 @@ export async function populate(c, scene) {
   const { people } = await c.rpc("maps.people", { mapId, version: scene.getFlag(MODULE_ID, "version"), pps: scene.grid.size });
   // The GM's NPCs survive: tokens they moved, renamed or linked stay; the same placeholder is reused.
   const old = scene.tokens.filter((tk) => tk.getFlag(MODULE_ID, "person"));
-  const plan = reconcile(old.map((tk) => ({ id: tk.id, name: tk.name, x: tk.x, y: tk.y, actorLink: tk.actorLink, flags: tk.flags })), people, { near: scene.grid.size / 2 });
+  const plan = reconcile(old.map((tk) => ({ id: tk.id, name: tk.name, x: tk.x, y: tk.y, actorLink: tk.actorLink, flags: tk.flags })), people);
   if (plan.drop.length) await scene.deleteEmbeddedDocuments("Token", plan.drop);
+  // A kept token the GM never moved (renamed or linked, still where Map Maker put it) goes along to
+  // the spot of the person it stands for, so a keeper stays behind a counter that moved. Without a
+  // record of where it was put, a move cannot be seen, so it stays where it stands.
+  const along = plan.keep.flatMap(({ id, reason, index }) => {
+    const placed = scene.tokens.get(id)?.getFlag(MODULE_ID, "placed");
+    if (reason === "moved" || index === undefined || !placed) return [];
+    const p = people[index];
+    return [{ _id: id, x: p.px, y: p.py, [`flags.${MODULE_ID}.placed`]: { ...placed, x: p.px, y: p.py } }];
+  });
+  if (along.length) await scene.updateEmbeddedDocuments("Token", along);
   const reused = plan.reuse.map(({ id, index }) => {
     const p = people[index];
     const tk = scene.tokens.get(id);

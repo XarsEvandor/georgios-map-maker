@@ -49,11 +49,14 @@ export function identityOf(tk) {
 
 /**
  * Sorts a scene's old townsfolk tokens against the people about to be placed.
- * old: [{ id, name, x, y, actorLink, flags }]; fresh: [{ name, role, px, py, ... }] (Map Maker's
- * people); o.near: how close (px) a kept token stands to a placeholder's spot to take it (half a square).
- * Returns { keep: [{ id, reason }], reuse: [{ id, index }], drop: [id], create: [index] }.
+ * old: [{ id, name, x, y, actorLink, flags }]; fresh: [{ name, role, px, py, ... }] (Map Maker's people).
+ * Every kept token stands for one of the fresh people, so none is placed twice: the one with its
+ * name, else the nearest one of its role still free. (A shop rebuilt with its counter elsewhere
+ * used to get a second keeper behind the new counter while the GM's keeper stood by the old one.)
+ * Returns { keep: [{ id, reason, index? }], reuse: [{ id, index }], drop: [id], create: [index] };
+ * a kept token's index is the fresh person it stands for.
  */
-export function reconcile(old, fresh, o = {}) {
+export function reconcile(old, fresh) {
   const keep = [];
   const rest = [];
   for (const tk of old) {
@@ -61,34 +64,51 @@ export function reconcile(old, fresh, o = {}) {
     if (reason) keep.push({ id: tk.id, reason, identity: identityOf(tk), tk });
     else rest.push(tk);
   }
-  const taken = new Set(keep.map((k) => k.identity).filter(Boolean));
-  // A kept token still standing where a placeholder of its role goes is that placeholder, even
-  // without a record of its name (tokens from before the record, or renamed): none placed on top.
-  const near = o.near ?? 0;
-  const spotTaken = new Set();
-  if (near > 0) {
-    fresh.forEach((p, i) => {
-      if (keep.some(({ tk }) => String(tk.flags?.[OWN]?.role ?? "") === String(p.role) && Math.hypot((tk.x ?? 0) - (p.px ?? 0), (tk.y ?? 0) - (p.py ?? 0)) <= near)) spotTaken.add(i);
-    });
-  }
   const byName = new Map();
   fresh.forEach((p, index) => {
     const n = placeholderName(p);
     if (!byName.has(n)) byName.set(n, []);
     byName.get(n).push(index);
   });
-  const reuse = [];
   const used = new Set();
+  const byNameFree = (name) => (name ? (byName.get(name) ?? []).find((i) => !used.has(i)) : undefined);
+  // Names first: kept tokens, then the placeholders to reuse.
+  for (const k of keep) {
+    const index = byNameFree(k.identity);
+    if (index !== undefined) {
+      used.add(index);
+      k.index = index;
+    }
+  }
+  const reuse = [];
   const drop = [];
   for (const tk of rest) {
-    const id = identityOf(tk);
-    const index = id && !taken.has(id) ? (byName.get(id) ?? []).find((i) => !used.has(i)) : undefined;
+    const index = byNameFree(identityOf(tk));
     if (index === undefined) drop.push(tk.id);
     else {
       used.add(index);
       reuse.push({ id: tk.id, index });
     }
   }
-  const create = fresh.map((_, i) => i).filter((i) => !used.has(i) && !taken.has(placeholderName(fresh[i])) && !spotTaken.has(i));
-  return { keep: keep.map(({ id, reason }) => ({ id, reason })), reuse, drop, create };
+  // Then a kept token without a name match takes the nearest free person of its role.
+  for (const k of keep) {
+    if (k.index !== undefined) continue;
+    const role = String(k.tk.flags?.[OWN]?.role ?? "");
+    let best;
+    let bestD = Infinity;
+    fresh.forEach((p, i) => {
+      if (used.has(i) || String(p.role) !== role) return;
+      const d = Math.hypot((k.tk.x ?? 0) - (p.px ?? 0), (k.tk.y ?? 0) - (p.py ?? 0));
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    if (best !== undefined) {
+      used.add(best);
+      k.index = best;
+    }
+  }
+  const create = fresh.map((_, i) => i).filter((i) => !used.has(i));
+  return { keep: keep.map(({ id, reason, index }) => ({ id, reason, ...(index !== undefined ? { index } : {}) })), reuse, drop, create };
 }

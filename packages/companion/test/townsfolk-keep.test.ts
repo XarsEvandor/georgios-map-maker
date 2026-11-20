@@ -46,4 +46,12 @@ describe("townsfolk the GM played survive Map Maker placing them again", () => {
     // Alys is kept where the GM put her, so no second "Alys, dockworker" appears on the street.
     expect(plan.create).toEqual([3]);
   });
+
+  it("places no fresh placeholder on top of a kept token of the same role standing in its spot", () => {
+    // Galauche: a written person's token from before the placement record, still behind the bar.
+    const old = [tok("galauche", "Galauche Greymane, barkeep", "barkeep", { x: 439, y: 1210, actorLink: true, other: true })];
+    const fresh = [{ ...person("Alys", "barkeep"), px: 439, py: 1210 }, { ...person("Hugh", "patron"), px: 439, py: 1210 }, { ...person("Ida", "barkeep"), px: 900, py: 900 }];
+    expect(reconcile(old, fresh, { near: 35 }).create).toEqual([1, 2]);
+    expect(reconcile(old, fresh).create).toEqual([0, 1, 2]);
+  });
 });

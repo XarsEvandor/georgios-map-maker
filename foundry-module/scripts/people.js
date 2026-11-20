@@ -120,7 +120,7 @@ export async function populate(c, scene) {
   const { people } = await c.rpc("maps.people", { mapId, version: scene.getFlag(MODULE_ID, "version"), pps: scene.grid.size });
   // The GM's NPCs survive: tokens they moved, renamed or linked stay; the same placeholder is reused.
   const old = scene.tokens.filter((tk) => tk.getFlag(MODULE_ID, "person"));
-  const plan = reconcile(old.map((tk) => ({ id: tk.id, name: tk.name, x: tk.x, y: tk.y, actorLink: tk.actorLink, flags: tk.flags })), people);
+  const plan = reconcile(old.map((tk) => ({ id: tk.id, name: tk.name, x: tk.x, y: tk.y, actorLink: tk.actorLink, flags: tk.flags })), people, { near: scene.grid.size / 2 });
   if (plan.drop.length) await scene.deleteEmbeddedDocuments("Token", plan.drop);
   const reused = plan.reuse.map(({ id, index }) => {
     const p = people[index];

@@ -49,18 +49,28 @@ export function identityOf(tk) {
 
 /**
  * Sorts a scene's old townsfolk tokens against the people about to be placed.
- * old: [{ id, name, x, y, actorLink, flags }]; fresh: [{ name, role, ... }] (Map Maker's people).
+ * old: [{ id, name, x, y, actorLink, flags }]; fresh: [{ name, role, px, py, ... }] (Map Maker's
+ * people); o.near: how close (px) a kept token stands to a placeholder's spot to take it (half a square).
  * Returns { keep: [{ id, reason }], reuse: [{ id, index }], drop: [id], create: [index] }.
  */
-export function reconcile(old, fresh) {
+export function reconcile(old, fresh, o = {}) {
   const keep = [];
   const rest = [];
   for (const tk of old) {
     const reason = keepReason(tk);
-    if (reason) keep.push({ id: tk.id, reason, identity: identityOf(tk) });
+    if (reason) keep.push({ id: tk.id, reason, identity: identityOf(tk), tk });
     else rest.push(tk);
   }
   const taken = new Set(keep.map((k) => k.identity).filter(Boolean));
+  // A kept token still standing where a placeholder of its role goes is that placeholder, even
+  // without a record of its name (tokens from before the record, or renamed): none placed on top.
+  const near = o.near ?? 0;
+  const spotTaken = new Set();
+  if (near > 0) {
+    fresh.forEach((p, i) => {
+      if (keep.some(({ tk }) => String(tk.flags?.[OWN]?.role ?? "") === String(p.role) && Math.hypot((tk.x ?? 0) - (p.px ?? 0), (tk.y ?? 0) - (p.py ?? 0)) <= near)) spotTaken.add(i);
+    });
+  }
   const byName = new Map();
   fresh.forEach((p, index) => {
     const n = placeholderName(p);
@@ -79,6 +89,6 @@ export function reconcile(old, fresh) {
       reuse.push({ id: tk.id, index });
     }
   }
-  const create = fresh.map((_, i) => i).filter((i) => !used.has(i) && !taken.has(placeholderName(fresh[i])));
+  const create = fresh.map((_, i) => i).filter((i) => !used.has(i) && !taken.has(placeholderName(fresh[i])) && !spotTaken.has(i));
   return { keep: keep.map(({ id, reason }) => ({ id, reason })), reuse, drop, create };
 }

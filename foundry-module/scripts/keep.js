@@ -1,0 +1,81 @@
+/**
+ * Which of a scene's townsfolk tokens survive when Map Maker places the townsfolk again (a rebuild,
+ * or an upgrade of how it places them). It used to delete every token it had placed, so an NPC the
+ * GM had played from a placeholder (moved into a house, renamed, linked to an actor) was lost with
+ * the rest. Now, for each old token:
+ * - kept as it is: the GM moved it (Map Maker records where it put each token; nothing else moves
+ *   townsfolk), renamed it (and no other module has taken the token over), or linked it to an actor;
+ * - reused in place: it is the same placeholder as one about to be placed (same name), so whatever
+ *   another module made of it stays;
+ * - removed: an untouched placeholder the new placement no longer has.
+ * Tokens placed before the record existed have no placement: a move cannot be seen, and a rename is
+ * judged by Map Maker's own naming ("Alys, dockworker").
+ * No Foundry globals here, so it can be tested outside Foundry.
+ */
+
+export const OWN = "georgios-map-maker";
+
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Map Maker's own name for a placeholder: "<given>, <role>". */
+export const placeholderName = (p) => `${p.name}, ${p.role}`;
+
+/** True when a name still is Map Maker's placeholder for this role. */
+export function looksPlaceholder(name, role) {
+  return new RegExp(`^[^,]+,\\s*${escapeRe(role ?? "")}$`, "i").test(String(name ?? ""));
+}
+
+/** Why an old token is kept ("moved", "renamed", "linked"), or null. */
+export function keepReason(tk) {
+  const f = tk.flags?.[OWN] ?? {};
+  const placed = f.placed;
+  if (placed && (Math.abs((tk.x ?? 0) - placed.x) > 1 || Math.abs((tk.y ?? 0) - placed.y) > 1)) return "moved";
+  if (tk.actorLink) return "linked";
+  const foreign = Object.keys(tk.flags ?? {}).some((k) => k !== OWN && k !== "core");
+  const renamed = placed?.name ? tk.name !== placed.name : !looksPlaceholder(tk.name, f.role);
+  if (renamed && !foreign) return "renamed";
+  return null;
+}
+
+/** The placeholder an old token stands for (its recorded name, or its name while it still is one). */
+export function identityOf(tk) {
+  const f = tk.flags?.[OWN] ?? {};
+  if (f.placed?.name) return f.placed.name;
+  return looksPlaceholder(tk.name, f.role) ? tk.name : null;
+}
+
+/**
+ * Sorts a scene's old townsfolk tokens against the people about to be placed.
+ * old: [{ id, name, x, y, actorLink, flags }]; fresh: [{ name, role, ... }] (Map Maker's people).
+ * Returns { keep: [{ id, reason }], reuse: [{ id, index }], drop: [id], create: [index] }.
+ */
+export function reconcile(old, fresh) {
+  const keep = [];
+  const rest = [];
+  for (const tk of old) {
+    const reason = keepReason(tk);
+    if (reason) keep.push({ id: tk.id, reason, identity: identityOf(tk) });
+    else rest.push(tk);
+  }
+  const taken = new Set(keep.map((k) => k.identity).filter(Boolean));
+  const byName = new Map();
+  fresh.forEach((p, index) => {
+    const n = placeholderName(p);
+    if (!byName.has(n)) byName.set(n, []);
+    byName.get(n).push(index);
+  });
+  const reuse = [];
+  const used = new Set();
+  const drop = [];
+  for (const tk of rest) {
+    const id = identityOf(tk);
+    const index = id && !taken.has(id) ? (byName.get(id) ?? []).find((i) => !used.has(i)) : undefined;
+    if (index === undefined) drop.push(tk.id);
+    else {
+      used.add(index);
+      reuse.push({ id: tk.id, index });
+    }
+  }
+  const create = fresh.map((_, i) => i).filter((i) => !used.has(i) && !taken.has(placeholderName(fresh[i])));
+  return { keep: keep.map(({ id, reason }) => ({ id, reason })), reuse, drop, create };
+}

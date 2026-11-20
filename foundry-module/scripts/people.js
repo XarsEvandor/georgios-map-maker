@@ -6,6 +6,7 @@
  * so a rebuild replaces them and nothing else.
  */
 
+import { placeholderName, reconcile } from "./keep.js";
 import { MODULE_ID } from "./lib.js";
 
 const TOKENS = "systems/dnd5e/tokens";
@@ -104,18 +105,38 @@ function actorFor(stat) {
   return actors.get(stat);
 }
 
-/** Puts the map's townsfolk on its scene, replacing any placed before. Returns how many. */
 /** Bumped when townsfolk are placed differently; maps placed before get theirs again on the GM's next look. 2: every trade's keeper (services, crafts, dens). */
 export const PEOPLE_LOOK = 2;
+
+/**
+ * Puts the map's townsfolk on its scene. Townsfolk placed before are sorted (keep.js): the ones the
+ * GM moved, renamed or linked stay, the same placeholders are reused, the rest give way. Returns how
+ * many new tokens it placed.
+ */
 
 export async function populate(c, scene) {
   const mapId = scene.getFlag(MODULE_ID, "mapId");
   if (!mapId) return 0;
   const { people } = await c.rpc("maps.people", { mapId, version: scene.getFlag(MODULE_ID, "version"), pps: scene.grid.size });
-  const old = scene.tokens.filter((tk) => tk.getFlag(MODULE_ID, "person")).map((tk) => tk.id);
-  if (old.length) await scene.deleteEmbeddedDocuments("Token", old);
+  // The GM's NPCs survive: tokens they moved, renamed or linked stay; the same placeholder is reused.
+  const old = scene.tokens.filter((tk) => tk.getFlag(MODULE_ID, "person"));
+  const plan = reconcile(old.map((tk) => ({ id: tk.id, name: tk.name, x: tk.x, y: tk.y, actorLink: tk.actorLink, flags: tk.flags })), people);
+  if (plan.drop.length) await scene.deleteEmbeddedDocuments("Token", plan.drop);
+  const reused = plan.reuse.map(({ id, index }) => {
+    const p = people[index];
+    const tk = scene.tokens.get(id);
+    const up = { _id: id, [`flags.${MODULE_ID}.kind`]: p.kind, [`flags.${MODULE_ID}.role`]: p.role };
+    // Where Map Maker put it before is known, and the GM has not moved it: to its new spot. Placed
+    // before that record existed: it stays where it stands (it may have been moved), recorded there.
+    if (tk.getFlag(MODULE_ID, "placed")) Object.assign(up, { x: p.px, y: p.py, rotation: p.rotation, alpha: p.asleep ? 0.8 : 1, [`flags.${MODULE_ID}.placed`]: { x: p.px, y: p.py, name: placeholderName(p) } });
+    else up[`flags.${MODULE_ID}.placed`] = { x: tk.x, y: tk.y, name: placeholderName(p) };
+    return up;
+  });
+  if (reused.length) await scene.updateEmbeddedDocuments("Token", reused);
+  if (plan.keep.length) ui.notifications.info(`Map Maker: kept ${plan.keep.length} townsfolk you moved, renamed or linked on ${scene.name}.`);
   const docs = [];
-  for (const [i, p] of people.entries()) {
+  for (const i of plan.create) {
+    const p = people[i];
     const k = KINDS[p.kind] ?? KINDS.commoner;
     const actor = await actorFor(k.stat);
     const h = hash(`${mapId}:${i}:${p.name}`);
@@ -137,7 +158,8 @@ export async function populate(c, scene) {
       displayBars: CONST.TOKEN_DISPLAY_MODES.NONE,
       sight: { enabled: false },
       ring: RING,
-      flags: { [MODULE_ID]: { person: true, kind: p.kind, role: p.role } },
+      // Where and as whom Map Maker placed it: a later placement can tell the GM moved or renamed it.
+      flags: { [MODULE_ID]: { person: true, kind: p.kind, role: p.role, placed: { x: p.px, y: p.py, name: placeholderName(p) } } },
     });
   }
   try {
@@ -146,7 +168,7 @@ export async function populate(c, scene) {
     console.error(`${MODULE_ID} | townsfolk tokens on ${scene.name}`, e, docs[0]);
     throw e;
   }
-  await scene.update({ [`flags.${MODULE_ID}.people`]: docs.length, [`flags.${MODULE_ID}.peopleLook`]: PEOPLE_LOOK });
+  await scene.update({ [`flags.${MODULE_ID}.people`]: docs.length + reused.length + plan.keep.length, [`flags.${MODULE_ID}.peopleLook`]: PEOPLE_LOOK });
   return docs.length;
 }
 

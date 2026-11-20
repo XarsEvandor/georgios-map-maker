@@ -24,6 +24,7 @@ export * from "./city/roof";
 export * from "./city/houses";
 export * from "./city/interiors";
 export * from "./city/shops";
+export * from "./city/storefront";
 export * from "./city/places";
 export * from "./city/night";
 export * from "./gen/noise";

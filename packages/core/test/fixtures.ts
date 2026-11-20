@@ -8,6 +8,7 @@ const PACKS: PackRecord[] = [
   { id: "PACKC", name: "2M Test Chapel", family: "2M", setting: "fantasy", file: "c.dungeondraft_pack", duplicates: [], folder: "t", fileCount: 1, prefabOnly: false, manifest: { name: "2M Test Chapel", id: "PACKC", version: "1", author: "test" }, readAllowed: true },
   { id: "SCIFI", name: "2MT Sci-Fi Test", family: "2MT", setting: "scifi", file: "d.dungeondraft_pack", duplicates: [], folder: "t", fileCount: 1, prefabOnly: false, manifest: { name: "2MT Sci-Fi Test", id: "SCIFI", version: "1", author: "test" }, readAllowed: true },
   { id: "DEPTH", name: "2MT Living Depths Test", family: "2MT", setting: "fantasy", file: "e.dungeondraft_pack", duplicates: [], folder: "t", fileCount: 1, prefabOnly: false, manifest: { name: "2MT Living Depths Test", id: "DEPTH", version: "1", author: "test" }, readAllowed: true },
+  { id: "STORE", name: "2MT Marketplace Test", family: "2MT", setting: "fantasy", file: "f.dungeondraft_pack", duplicates: [], folder: "t", fileCount: 1, prefabOnly: false, manifest: { name: "2MT Marketplace Test", id: "STORE", version: "1", author: "test" }, readAllowed: true },
 ];
 
 let n = 0;
@@ -89,6 +90,20 @@ export function testIndex(): AssetIndex {
     a.tag = { role: "gate", facing: "down", placement: "wall", fit: 3, style: "gothic", tone: "dark" };
     assets.push(a);
   }
+  // Shopfronts (city/storefront.ts) by their 2MT names, on roles no recipe asks for: a sign with its
+  // Colorable twin, goods tables, a doormat, the shops' terracotta tiles.
+  const sign = asset("STORE", "object", "Tavern Sign 1 - Blank", [], [1.3, 1], [40, 20, 25]);
+  sign.tag = { role: "shop_sign", facing: "none", placement: "wall", fit: 3 };
+  const twin = asset("STORE", "object", "Tavern Sign 1 - Blank - Colorable", [], [1.3, 1], [60, 0, 0]);
+  Object.assign(twin, { colorable: true, colorableOf: sign.id });
+  twin.tag = { role: "shop_sign", facing: "none", placement: "wall", fit: 3 };
+  assets.push(sign, twin);
+  for (const [name, fp] of [["Stall - Butcher", [1.8, 0.95]], ["Stall - Potions", [2.05, 1.05]], ["Stall - Chests", [1, 0.95]], ["Stall - Crystals", [0.9, 0.95]], ["Stall - Produce 2.0", [2.25, 0.8]], ["Stall - Blacksmith 1.0", [2.75, 1.1]], ["Stall - Weapons 1", [1.1, 1]], ["Display - Bread 1", [0.9, 1.4]], ["Rug - Doormat 1", [0.75, 0.5]]] as Array<[string, [number, number]]>) {
+    const a = asset("STORE", "object", name, [], fp, [50, 15, 25]);
+    a.tag = { role: name.startsWith("Rug") ? "doormat" : "stall_goods", facing: "none", placement: "free", fit: 3 };
+    assets.push(a);
+  }
+  assets.push(asset("STORE", "pattern", "Texture - Greek Tiles - Terracotta 1", [], [4, 4], [55, 25, 30]));
   for (const [kind, name, fp, use] of MATERIALS) {
     const a = asset("PACKA", kind, name, [], fp, [45, 8, 14]);
     a.mat = { use, fit: 3, tone: "medium", style: "rustic" };

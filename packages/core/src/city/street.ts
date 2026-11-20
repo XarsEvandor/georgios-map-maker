@@ -22,6 +22,7 @@ import { noise2, smoothstep } from "../gen/noise";
 import { houseArtFrom, placeHouses } from "./houses";
 import { cityPlaces } from "./places";
 import { TRADES, type Trade } from "./shops";
+import { SMALL_GOODS, STOREFRONTS } from "./storefront";
 import { furnishBuilding, type BuildingKind } from "./interiors";
 import { RECIPE_BY_TYPE, rolesOfRecipe } from "../gen/recipes";
 
@@ -175,6 +176,8 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     return a;
   };
   const doorLamps: Array<{ at: Vec; out: Vec; n: number }> = [];
+  // Shops' street doors and the way out, for their storefronts (storefront.ts).
+  const fronts: Array<{ door: Vec; out: Vec; trade: Trade; key: string }> = [];
   // Every house's wall line and street door, for the street lights.
   const houseWalls: Vec[][] = [];
   const doorSpots: Vec[] = [];
@@ -447,14 +450,18 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     }
     return out;
   };
+  const shopFloor = cat.search(/^Texture - Greek Tiles - Terracotta 1$/, "pattern")[0] ?? indoor?.floors.tile;
   /** Buildings shown from inside: the weather stays out of them (roofed buildings get it on the roof). */
   const sheltered: Shelter[] = [];
   /** Floor, inner walls with doors and furniture for one building (`shape` is its wall line). */
   const furnish = (key: string, floorRing: Vec[], shape: Vec[], doorAt: Vec | undefined, kind: BuildingKind, trade?: Trade) => {
     if (!indoor) return;
     sheltered.push({ points: shape.map(([x, y]) => [x, y] as [number, number]) });
-    const it = furnishBuilding({ key, shape, door: doorAt, kind, trade, plan, cat, style: indoor, zone: zoneId });
-    const floor = use(indoor.floors[it.floor] ?? indoor.floors.wood ?? indoor.floors.stone);
+    // A shop's cloth (rugs, hangings, tintable pieces) takes its trade's colour, the colour of its sign.
+    const look = trade && !TRADES[trade].secret ? STOREFRONTS[trade] : undefined;
+    const it = furnishBuilding({ key, shape, door: doorAt, kind, trade, plan, cat, style: look ? { ...indoor, fabric: look.color } : indoor, zone: zoneId });
+    // Shops on terracotta tiles: warm, and unlike the homes' boards and the great buildings' stone.
+    const floor = use((look ? shopFloor : undefined) ?? indoor.floors[it.floor] ?? indoor.floors.wood ?? indoor.floors.stone);
     if (floor) elements[b.addPattern({ points: floorRing.map(px), texture: floor.res })] = { kind: "floor", key: `floor:${key}`, zone: zoneId, asset: floor.id };
     it.walls.forEach((wl, i) => {
       const ds = wl.doors.map((d, k) => ({ d, locked: !!wl.locked?.[k] })).filter((x) => insideMap(x.d));
@@ -518,6 +525,23 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
       const mids = walls.map((e) => e.p);
       const near = (list: Vec[]) => list.reduce((best, p) => (Math.hypot(p[0] - fm[0], p[1] - fm[1]) < Math.hypot(best[0] - fm[0], best[1] - fm[1]) ? p : best), list[0]!);
       let doorAt = mids.length ? near(mids) : fm;
+      // A shop opens onto the most open stretch of street it has (room for its goods out front),
+      // the street side breaking ties.
+      if (indoor && shopOf.has(n)) {
+        // Free ground in front of the door and either side of it (the shop's own walls count).
+        const room = (e: { p: Vec; out: Vec }) => {
+          let k = 0;
+          for (const d of [0.7, 1.4, 2.1, 2.8]) for (const a of [-2.4, -1.4, 0, 1.4, 2.4]) {
+            const q: Vec = [e.p[0] + e.out[0] * d - e.out[1] * a, e.p[1] + e.out[1] * d + e.out[0] * a];
+            if (insideMap(q, 0.3) && !builtAt(q, -1) && !inside(q as Pt, shape as Ring)) k++;
+          }
+          return k;
+        };
+        const fronts0 = walls.filter((e) => e.len >= 2.2 && insideMap(e.p));
+        const most = Math.max(0, ...fronts0.map(room));
+        const open0 = fronts0.filter((e) => room(e) === most).map((e) => e.p);
+        if (most >= 12 && open0.length) doorAt = near(open0);
+      }
       let inside0 = mids.length > 0 && insideMap(doorAt);
       // A building cut by the map's edge whose street door is off the map: the door goes on the
       // nearest wall that is on the map and opens onto free ground, so the party can get in.
@@ -540,6 +564,8 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
       const lamps = hs.landmark ? (DOOR_LAMPS[hs.landmark] ?? 0) : trade && !TRADES[trade].secret ? 1 : 0;
       const doorWall = lamps && door && inside0 ? walls.find((e) => e.p === doorAt) : undefined;
       if (doorWall) doorLamps.push({ at: doorAt, out: doorWall.out, n: lamps });
+      const shopDoor = trade && door && inside0 ? walls.find((e) => e.p === doorAt) : undefined;
+      if (trade && shopDoor) fronts.push({ door: doorAt, out: shopDoor.out, trade, key: `a${n}` });
       const bb = bboxOf(shape);
       for (let yy = Math.floor(bb.y); yy < bb.y + bb.h; yy += 0.25) for (let xx = Math.floor(bb.x); xx < bb.x + bb.w; xx += 0.25) {
         if (inside([xx + 0.125, yy + 0.125], shape as Ring)) grid.mark({ x: xx, y: yy, w: 0.25, h: 0.25 }, Cell.Wall);
@@ -669,6 +695,7 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     furnish(`house#${i}`, r, r, best?.at, plotKind, plotTrade);
     const plotLamps = plotKind === "keep" ? 2 : plotTrade && !TRADES[plotTrade].secret ? 1 : 0;
     if (plotLamps && best && door) doorLamps.push({ at: best.at, out: best.out, n: plotLamps });
+    if (plotTrade && best && door) fronts.push({ door: best.at, out: best.out, trade: plotTrade, key: `p${i}` });
     // Buildings are solid for the dressing grid.
     const bb = bboxOf(r);
     for (let yy = Math.floor(bb.y); yy < bb.y + bb.h; yy += 0.25) for (let xx = Math.floor(bb.x); xx < bb.x + bb.w; xx += 0.25) {
@@ -900,6 +927,61 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     }
   }
 
+  // Shopfronts, so a shop stands out among the houses: a hanging sign in the trade's colour beside
+  // the door, the trade's goods on tables out front either side of it, a mat at the door. Placed
+  // before the street clutter so the goods get the front. Secret places show nothing.
+  const signSides = new Map<string, number>();
+  const doorKey = (p: Vec) => `${p[0].toFixed(2)},${p[1].toFixed(2)}`;
+  const signArt = cat.search(/^Tavern Sign 1 - Blank$/)[0];
+  const mats = cat.search(/^Rug - Doormat [1-7]$/);
+  for (const f of fronts) {
+    const sf = STOREFRONTS[f.trade];
+    if (!sf || TRADES[f.trade].secret || !insideMap(f.door, 0.5)) continue;
+    const frng = new Rng(`${plan.seed}:front:${f.key}`);
+    const along: Vec = [-f.out[1], f.out[0]];
+    const side = frng.next() < 0.5 ? -1 : 1;
+    const spot = (a: number, o: number): Vec => [f.door[0] + along[0] * a + f.out[0] * o, f.door[1] + along[1] * a + f.out[1] * o];
+    if (signArt) {
+      const at = spot(side * 1.15, frontSize(signArt).depth / 2 + 0.05);
+      if (insideMap(at, 0.3) && place(ctx, { asset: use(signArt)!, role: "sign", at, rot: rotationFor(signArt, f.out), layer: LAYER.overhead, zone: zoneId, feature: "shop_signs", occupy: "force", color: sf.color, light: false })) signSides.set(doorKey(f.door), side);
+    }
+    const mat = mats.length ? frng.pick(mats) : undefined;
+    if (mat) for (const o of [0.5, 0.75, 1]) if (place(ctx, { asset: use(mat)!, role: "mat", at: spot(0, o), rot: rotationFor(mat, f.out), layer: LAYER.decal, zone: zoneId, feature: "shop_mats", occupy: "low", light: false })) break;
+    const named = sf.goods ? cat.search(sf.goods) : [];
+    const smallNamed = sf.small ? cat.search(sf.small) : [];
+    // Two tables, one each side of the door; when one side is blocked, both on the other.
+    const sides = [-side, side];
+    const done: number[] = [];
+    for (let k = 0; k < 4 && done.length < 2; k++) {
+      const sg = sides[k % 2]!;
+      if (k >= 2 && (!done.includes(sg) || done.length !== 1)) continue;
+      const asset = named.length ? frng.pick(named) : sf.roles?.length ? pick(ctx, zoneId, frng.pick(sf.roles), { maxSide: 2.6 }, frng) : undefined;
+      if (!asset) continue;
+      const fs = frontSize(asset);
+      // Clear of the door (and on the sign's side, clear of the sign), a step out from the wall: the
+      // nearest free spot, out and along the front. A second table on the same side goes past the first.
+      const from = (sg === side ? 1.9 : 0.85) + fs.width / 2 + (k >= 2 ? fs.width + 0.4 : 0);
+      search: for (const out of [0.55, 0.8, 1.1, 1.45]) for (const extra of [0, 0.45, 0.9, 1.5]) {
+        const at = spot(sg * (from + extra), fs.depth / 2 + out);
+        if (!insideMap(at, 0.5)) continue;
+        if (place(ctx, { asset: use(asset)!, role: "goods", at, rot: rotationFor(asset, f.out), layer: LAYER.furniture, zone: zoneId, feature: "shop_goods", occupy: "clutter", light: false })) {
+          done.push(sg);
+          break search;
+        }
+      }
+    }
+    // A front with no room for a table gets smaller goods by the door: the trade's crates and baskets.
+    if (!done.length && (sf.goods || sf.roles || sf.small)) for (const sg of sides) {
+      const asset = smallNamed.length ? frng.pick(smallNamed) : pick(ctx, zoneId, frng.pick(SMALL_GOODS), { maxSide: 1.1 }, frng);
+      if (!asset) continue;
+      const fs = frontSize(asset);
+      search: for (const out of [0.4, 0.6, 0.85]) for (const a of [0.75, 1.1, 1.5]) {
+        const at = spot(sg * (a + fs.width / 2 + (sg === side ? 0.9 : 0)), fs.depth / 2 + out);
+        if (insideMap(at, 0.5) && place(ctx, { asset: use(asset)!, role: "goods", at, rot: rotationFor(asset, f.out), layer: LAYER.furniture, zone: zoneId, feature: "shop_goods", occupy: "clutter", light: false })) break search;
+      }
+    }
+  }
+
   // Street clutter against the house walls: walk the building edges that face the street.
   // No troughs: the library's only troughs are a magic shop's glowing fungi planters.
   const clutter: Array<[string, number]> = [["barrel", 3], ["crate", 3], ["sack", 2], ["basket", 1], ["debris", 0.6]];
@@ -1013,7 +1095,9 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
   for (const d of torch ? doorLamps : []) {
     const along: Vec = [-d.out[1], d.out[0]];
     const off = frontSize(torch!).depth / 2 + 0.12;
-    for (const sg of d.n === 2 ? [-1, 1] : [lrng.next() < 0.5 ? -1 : 1]) {
+    // A shop's torch goes on the other side of the door from its sign.
+    const sign = signSides.get(doorKey(d.at));
+    for (const sg of d.n === 2 ? [-1, 1] : [sign ? -sign : lrng.next() < 0.5 ? -1 : 1]) {
       const at: Vec = [d.at[0] + along[0] * 0.95 * sg + d.out[0] * off, d.at[1] + along[1] * 0.95 * sg + d.out[1] * off];
       if (insideMap(at, 0.4)) place(ctx, { asset: torch!, role: "torch", at, rot: rotationFor(torch!, d.out), layer: LAYER.overhead, zone: zoneId, feature: "door_lights", occupy: "force", light: LIGHTS.torch });
     }

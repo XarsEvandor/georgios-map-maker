@@ -559,8 +559,8 @@ const populating = new Set();
 let toldAboutStats = false;
 let toldAboutRefresh = false;
 
-/** Bumped when street maps change their look; older street scenes are rebuilt when the GM opens them. 2: buildings from inside. 3: services, mansions, the garrison. 4: lights at night. 5: street lamps. */
-const STREET_LOOK = 5;
+/** Bumped when street maps change their look; older street scenes are rebuilt when the GM opens them. 2: buildings from inside. 3: services, mansions, the garrison. 4: lights at night. 5: street lamps. 6: shops stand out (sign, goods out front, terracotta floor, no bedrooms). */
+const STREET_LOOK = 6;
 
 /**
  * Rebuilds an older street map in place (image, walls, lights, townsfolk). Other places of a city

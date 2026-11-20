@@ -1,7 +1,7 @@
 /** Buildings seen from inside on street maps (city/interiors.ts, city/street.ts). */
 
 import { describe, expect, it } from "vitest";
-import { allHotSpots, buildStyles, Catalog, furnishBuilding, generate, hotspotPlan, LAMPS_LIT_FROM, parseCity, parseVector2Array, PX_PER_SQUARE, Rng, toFoundryScene, TRADES, type Placed, type ScenePlan } from "../src/index";
+import { allHotSpots, buildStyles, Catalog, furnishBuilding, generate, hotspotPlan, LAMPS_LIT_FROM, parseCity, parseVector2Array, PX_PER_SQUARE, Rng, STOREFRONTS, toFoundryScene, TRADES, type Placed, type ScenePlan } from "../src/index";
 import { testIndex, townJson } from "./fixtures";
 
 type V = [number, number];
@@ -148,15 +148,49 @@ describe("shops", () => {
     expect(allHotSpots(city).filter((h) => h.kind === "shop").map((h) => [h.id, h.at])).toEqual(shops.map((h) => [h.id, h.at]));
   });
 
-  it("sells from a counter at the front, with the family's rooms behind", () => {
+  it("sells from a counter on a shop floor that takes the street door, a store behind, no bedrooms", () => {
     const shape: V[] = [[0, 0], [12, 0], [12, 7], [0, 7]];
     const s = furnishBuilding({ key: "s1", shape, door: [3, 7], kind: "house", trade: "merchant", plan, cat, style, zone: "streets" });
-    expect(s.rooms[0]).toBe("shop.merchant");
-    expect(s.rooms.length).toBeGreaterThan(1);
+    expect(s.rooms).toEqual(["shop.merchant", "tavern.storage"]);
     const counter = s.placed.find((p) => p.room === "shop.merchant" && p.feature === "counter");
     expect(counter).toBeDefined();
     // Goods on the counter.
     expect(s.placed.some((p) => p.parent === counter!.key)).toBe(true);
+    // A big shop: a store and a workroom, still no family rooms (a shop full of beds reads as a house).
+    const big = furnishBuilding({ key: "s2", shape: [[0, 0], [16, 0], [16, 10], [0, 10]], door: [5, 10], kind: "house", trade: "baker", plan, cat, style, zone: "streets" });
+    expect(big.rooms[0]).toBe("shop.baker");
+    for (const r of big.rooms) expect(["house.bedroom", "house.home", "house.living"]).not.toContain(r);
+  });
+
+  it("gives every shop a front to the street: a sign in its trade's colour, its goods, a mat, its tiles", () => {
+    let fronts = 0;
+    for (const h of shops) {
+      const p = hotspotPlan(city, h, { key: "0123456789abcdef", prefix: "testburg" });
+      const m = generate(p, cat, { city, date: new Date(2026, 10, 6), houses: "roofs" });
+      const v = m.versions[0]!;
+      const level = (v.map as Record<string, any>).world.levels["0"];
+      const sq = (pts: string) => parseVector2Array(pts).map(([x, y]) => [x / PX_PER_SQUARE, y / PX_PER_SQUARE] as V);
+      const houses = (level.walls ?? []).filter((w: any) => w.loop && String(v.elements[String(w.node_id)]?.key ?? "").startsWith("house")).map((w: any) => sq(w.points));
+      const signs = v.placed.filter((q) => q.feature === "shop_signs");
+      const goods = v.placed.filter((q) => q.feature === "shop_goods");
+      for (const s of signs) {
+        // Each sign wears a shop's colour, through the sign's Colorable twin.
+        expect(s.asset.colorable).toBe(true);
+        expect(Object.values(STOREFRONTS).map((f) => f!.color)).toContain(s.customColor);
+      }
+      // Goods stand out in the street, never inside a building.
+      for (const g of goods) expect(houses.some((hs: V[]) => inPoly(centre(g), hs)), `${g.asset.name} on ${h.id}`).toBe(false);
+      // The map's own shop shows its colour.
+      if (signs.some((s) => s.customColor === STOREFRONTS[h.trade!]?.color)) fronts++;
+      // Shops stand on terracotta tiles; homes keep their boards.
+      const tiles = Object.entries(v.elements).filter(([, e]) => e.kind === "floor" && /Terracotta/.test(e.asset ?? "")).length;
+      if (signs.length) expect(tiles, h.id).toBeGreaterThan(0);
+    }
+    expect(fronts).toBeGreaterThanOrEqual(Math.ceil(shops.length / 2));
+  });
+
+  it("leaves the secret places unmarked: no sign, no goods", () => {
+    for (const t of Object.keys(TRADES) as Array<keyof typeof TRADES>) if (TRADES[t].secret) expect(STOREFRONTS[t]).toBeUndefined();
   });
 });
 

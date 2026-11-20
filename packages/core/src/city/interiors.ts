@@ -160,11 +160,12 @@ function program(kind: BuildingKind, area: number, rng: Rng, trade?: Trade): Pro
     return P(t.room, r.rest, r.filler ?? [], r.side ?? 6.5, 4, 3);
   }
   if (trade) {
-    // The shop at the front; a store and the family's rooms behind it.
+    // The shop takes the street door and most of the building; its store behind. No bedrooms: a
+    // shop full of beds read as one more house among the houses.
     const shop = TRADES[trade].room;
-    if (area < 26) return P(shop, [], [], 99, 1, 1);
-    if (area < 60) return P(shop, [rng.next() < 0.5 ? "tavern.storage" : "house.home"], [], 99, 2, 1);
-    return P(shop, ["tavern.storage", "house.living", "house.bedroom"], ["house.bedroom"], 6.5, 3, 2);
+    if (area < 30) return P(shop, [], [], 99, 1, 1);
+    if (area < 110) return P(shop, ["tavern.storage"], [], 99, 2, 1);
+    return P(shop, ["tavern.storage", "house.workroom"], ["tavern.storage"], 9, 2, 2);
   }
   switch (kind) {
     case "church": case "chapel": case "parish":

@@ -216,11 +216,11 @@ function room(type: string, steps: Step[], light: string[] = ["candle", "lantern
   return { type, steps: [...steps, { kind: "sconces", id: "light", roles: light, every }, GRIME, DOOR_DIRT, COBWEBS, RUIN] };
 }
 
-/** A shop room: its own steps, then lights and the wear every room gets. */
+/** A shop room: a rug in the shop's colour on the floor, its own steps, then lights and the wear every room gets. */
 function shop(trade: string, steps: Step[], opts: { light?: string[]; floorGrime?: number } = {}): Recipe {
   return {
     type: `shop.${trade}`,
-    steps: [...steps, { kind: "sconces", id: "light", roles: opts.light ?? ["candle", "lantern", "sconce"], every: 6 }, GRIME, ...(opts.floorGrime ? [{ ...GRIME_FLOOR, perArea: opts.floorGrime }] : []), DOOR_DIRT, COBWEBS, RUIN],
+    steps: [{ kind: "center", id: "shop_rug", roles: ["rug"], p: 0.9, minArea: 9 }, ...steps, { kind: "sconces", id: "light", roles: opts.light ?? ["candle", "lantern", "sconce"], every: 6 }, GRIME, ...(opts.floorGrime ? [{ ...GRIME_FLOOR, perArea: opts.floorGrime }] : []), DOOR_DIRT, COBWEBS, RUIN],
   };
 }
 

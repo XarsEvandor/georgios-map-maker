@@ -131,3 +131,5 @@ Not yet verified or built:
 ## Licensing
 
 2-Minute Tabletop assets are CC BY-NC 4.0 and "only intended for private use". This project ships no assets and reads your purchased packs locally; only rendered images go to your own Foundry. Packs that set `allow_3rd_party_mapping_software_to_read` to false are skipped (none of yours do). Keep it free and personal; ask 2-Minute Tabletop before any paid release.
+
+The lion on the "Georgios' Modules" toolbar group is by Lorc, from [game-icons.net](https://game-icons.net), under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).

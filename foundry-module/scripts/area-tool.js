@@ -34,7 +34,7 @@ export function registerAreaTool({ openPanel, onArea, t, openCompanions }) {
         name: "georgios",
         order: 20,
         title: "Georgios' Modules",
-        icon: "fa-solid fa-dragon",
+        icon: "georgios-lion",
         layer: "georgios",
         visible: true,
         activeTool: "georgiosArea",

@@ -135,3 +135,16 @@ body > #gmm-clock { position: fixed; top: 8px; left: 50%; transform: translateX(
 .gmm-time-dialog .gmm-time-row select { flex: 1 1 auto; }
 .gmm-time-dialog .gmm-time-row button { flex: 0 0 auto; width: auto; white-space: nowrap; }
 .gmm-time-dialog .hint { margin: 4px 0 0; font-size: var(--font-size-12, 12px); opacity: 0.8; }
+
+/* The "Georgios' Modules" toolbar group: a lion (Lorc, game-icons.net, CC BY 3.0), in the toolbar's own colour.
+   Every Georgios module carries it, since whichever loads first makes the group. */
+#scene-controls .control.georgios-lion::before {
+  content: "";
+  display: block;
+  width: 1.1em;
+  height: 1.1em;
+  margin: auto;
+  background-color: currentColor;
+  -webkit-mask: url("../assets/lion.svg") center / contain no-repeat;
+  mask: url("../assets/lion.svg") center / contain no-repeat;
+}

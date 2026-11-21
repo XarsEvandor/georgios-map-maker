@@ -22,6 +22,19 @@ async function companionFetch(...args) {
   }
 }
 
+/**
+ * The way between two towns of the world imported here, for other modules (Georgios Scribbler's
+ * assistant asks it about journeys): { found, text, image: { media_type, data }, unknown } from the
+ * companion. The world is the one this Foundry world's imported scenes come from (the current
+ * scene's, when several).
+ */
+async function route({ from, to, image = true } = {}) {
+  const worlds = [...new Set(game.scenes.map((s) => s.getFlag(MODULE_ID, "world")).filter(Boolean))];
+  const world = canvas.scene?.getFlag(MODULE_ID, "world") ?? worlds[0];
+  if (!world) return { found: false, text: "No Map Maker world is imported into this Foundry world, so there is no map to measure." };
+  return client().rpc("maps.route", { world, from, to, image });
+}
+
 function client() {
   const url = game.settings.get(MODULE_ID, "companionUrl");
   const token = game.settings.get(MODULE_ID, "token");
@@ -762,7 +775,7 @@ Hooks.once("init", () => {
 });
 
 Hooks.once("ready", () => {
-  game.modules.get(MODULE_ID).api = { open: openPanel, buildScene: (mapId, version) => buildScene(client(), mapId, version), openCity, importWorld, importDialog, listWorlds, populate: (scene = canvas.scene) => populate(client(), scene) };
+  game.modules.get(MODULE_ID).api = { open: openPanel, buildScene: (mapId, version) => buildScene(client(), mapId, version), openCity, importWorld, importDialog, listWorlds, populate: (scene = canvas.scene) => populate(client(), scene), route };
   if (game.user.isGM && game.users.activeGM?.id === game.user.id) {
     importActors()
       .then(() => importUpdates())

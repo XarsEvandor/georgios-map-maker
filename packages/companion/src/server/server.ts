@@ -12,6 +12,7 @@ import { enablePacksInDungeondraft, openInDungeondraft, watchMapFile } from "../
 import type { ChatEvent, LlmBackend } from "../llm/backend";
 import type { MapStore } from "./store";
 import { runTool, TOOLS } from "./tools";
+import { worldRoute } from "../world/route";
 
 export interface ServerOptions {
   store: MapStore;
@@ -129,6 +130,9 @@ export class CompanionServer {
         const pps = Math.max(32, Math.min(256, Number(p.pps ?? 100)));
         return { people: s.people(String(p.mapId), p.version, pps) };
       }
+      case "maps.route":
+        // The way between two towns of a built world, in words and as a picture (for the GM's assistant).
+        return worldRoute(s.dataDir, String(p.world ?? ""), String(p.from ?? "").slice(0, 120), String(p.to ?? "").slice(0, 120), { image: p.image !== false });
       case "dd.open": {
         const file = s.mapFile(String(p.mapId), p.version);
         const version = s.version(String(p.mapId), p.version).id;

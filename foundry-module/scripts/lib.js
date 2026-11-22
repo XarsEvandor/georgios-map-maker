@@ -104,9 +104,9 @@ export function leafFileName(mapId, versionId, portal) {
   return `${String(mapId).replace(/[^a-z0-9_-]/gi, "_")}-${String(versionId).replace(/[^a-z0-9_-]/gi, "_")}-leaf-${String(portal).replace(/[^a-z0-9]/gi, "")}-${Date.now()}.png`;
 }
 
-/** Safe file name for an uploaded sundial hand (its shadow, a tile texture). */
-export function handFileName(mapId, versionId, hand) {
-  return `${String(mapId).replace(/[^a-z0-9_-]/gi, "_")}-${String(versionId).replace(/[^a-z0-9_-]/gi, "_")}-hand-${String(hand).replace(/[^a-z]/gi, "")}-${Date.now()}.png`;
+/** Safe file name for an uploaded sundial shadow (a tile texture). */
+export function shadowFileName(mapId, versionId) {
+  return `${String(mapId).replace(/[^a-z0-9_-]/gi, "_")}-${String(versionId).replace(/[^a-z0-9_-]/gi, "_")}-shadow-${Date.now()}.png`;
 }
 
 /**

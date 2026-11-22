@@ -124,9 +124,9 @@ export class CompanionServer {
         const vid = s.version(String(p.mapId), p.version).id;
         const scene = s.exportScene(String(p.mapId), p.version, pps);
         const leaves = scene.walls.filter((w) => w.animation?.texture.startsWith("leaf:")).map((w) => ({ portal: w.animation!.texture.slice(5), path: `/leaf/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}/${encodeURIComponent(w.animation!.texture.slice(5))}` }));
-        // A sundial's hands: their shadows as images for the tiles.
-        const hands = (scene.tiles ?? []).filter((t) => t.texture.src.startsWith("hand:")).map((t) => ({ hand: t.texture.src.slice(5), path: `/hand/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}/${encodeURIComponent(t.texture.src.slice(5))}?pps=${pps}` }));
-        return { scene, imagePath: `/image/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}?pps=${pps}&leaves=hide`, leaves, hands };
+        // A sundial tower's shadow: its image for the tile.
+        const shadow = (scene.tiles ?? []).some((t) => t.texture.src === "shadow") ? { path: `/shadow/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}?pps=${pps}` } : undefined;
+        return { scene, imagePath: `/image/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}?pps=${pps}&leaves=hide`, leaves, ...(shadow ? { shadow } : {}) };
       }
       case "maps.people": {
         const pps = Math.max(32, Math.min(256, Number(p.pps ?? 100)));
@@ -249,10 +249,10 @@ export class CompanionServer {
         res.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" });
         return void res.end(png);
       }
-      const hm = /^\/hand\/([^/]+)\/([^/]+)\/(hour|minute|second)$/.exec(url.pathname);
+      const hm = /^\/shadow\/([^/]+)\/([^/]+)$/.exec(url.pathname);
       if (req.method === "GET" && hm) {
         const pps = Math.max(16, Math.min(256, Number(url.searchParams.get("pps") ?? 100)));
-        const png = await this.o.store.handPng(decodeURIComponent(hm[1]!), decodeURIComponent(hm[2]!), hm[3]!, pps);
+        const png = await this.o.store.shadowPng(decodeURIComponent(hm[1]!), decodeURIComponent(hm[2]!), pps);
         res.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" });
         return void res.end(png);
       }

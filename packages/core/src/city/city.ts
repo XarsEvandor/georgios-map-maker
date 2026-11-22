@@ -7,7 +7,7 @@
  * Screen coordinates: x east, y south (GeoJSON y is flipped).
  */
 
-import type { CastMember, SundialGemPlan, Hand } from "../gen/plan";
+import type { CastMember, SundialGemPlan } from "../gen/plan";
 import type { Trade } from "./shops";
 
 export type Pt = [number, number];
@@ -17,20 +17,24 @@ export interface Box { x: number; y: number; w: number; h: number }
 /**
  * A sundial tower the DM asked for in a city (the city's meta.json, `set.sundial`): the wizard's
  * tower stands on the plot at `at`, the houses within `clear` metres of it make way for its plaza,
- * and the dial, the gems and the hands come from gen/sundial.ts.
+ * and the dial, the gems and the shadow come from gen/sundial.ts.
  */
 export interface CitySundial {
   /** A point on (or nearest) the tower's plot, metres. */
   at: Pt;
+  /** Make the tower's plot a square of this side (metres), turned like the plot it replaces: room inside for the device, the cast and a fight. */
+  size?: number;
   /** Ring radius, metres (default: half the plot plus a walk round the tower). */
   radius?: number;
   /** Houses within this many metres of the tower's centre make way (default: the ring and a bit). */
   clear?: number;
+  /** In the order the shadow has to rest on them: the GM's secret. */
   gems: SundialGemPlan[];
-  stopped: Record<Hand, number>;
-  /** Who stands frozen in the vestibule under the dial. */
+  /** The numeral (1..12) the shadow stands on to begin with. */
+  stopped: number;
+  /** Who stands frozen inside the tower. */
   cast?: CastMember[];
-  /** The GM's notes for the vestibule's journal page. */
+  /** The GM's notes: a page of the city's journal for the GM alone. */
   notes?: string;
 }
 
@@ -121,7 +125,7 @@ export function parseCity(json: unknown, meta: { name?: string; url: string; set
   const trees: Pt[] = treesG?.type === "MultiPoint" ? (treesG.coordinates as number[][]).map(flip) : [];
   let buildings = polys("buildings");
   if (!buildings.length) throw new Error("the city export has no buildings");
-  // A sundial tower: the plot under `at` is the tower's; the houses round it make way for the plaza.
+  // A sundial tower: the plot under `at` is the tower's (made a square of `size` when asked); the houses round it make way for the plaza.
   let set: CitySet | undefined;
   const sd = meta.set?.sundial;
   if (sd && Array.isArray(sd.at) && sd.at.length === 2) {
@@ -129,8 +133,20 @@ export function parseCity(json: unknown, meta: { name?: string; url: string; set
     const d = (r: Ring) => Math.hypot(centroid(r)[0] - at[0], centroid(r)[1] - at[1]);
     let tower = buildings.findIndex((r) => inside(at, r));
     if (tower < 0) tower = buildings.reduce((best, r, i) => (d(r) < d(buildings[best]!) ? i : best), 0);
-    const ring = buildings[tower]!;
+    let ring = buildings[tower]!;
     const c = centroid(ring);
+    if (typeof sd.size === "number" && sd.size >= 6 && sd.size <= 60) {
+      // A square of the asked side, turned like the plot's longest edge.
+      let th = 0, best = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i]!, b = ring[(i + 1) % ring.length]!;
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len > best) [best, th] = [len, Math.atan2(b[1] - a[1], b[0] - a[0])];
+      }
+      const hs = sd.size / 2, cs = Math.cos(th), sn = Math.sin(th);
+      ring = ([[-hs, -hs], [hs, -hs], [hs, hs], [-hs, hs]] as Pt[]).map(([x, y]) => [c[0] + x * cs - y * sn, c[1] + x * sn + y * cs] as Pt);
+      buildings = buildings.map((r, i) => (i === tower ? ring : r));
+    }
     const bb = bboxOf(ring);
     const radius = sd.radius ?? Math.max(bb.w, bb.h) / 2 + 3.5;
     const clear = sd.clear ?? radius + 2.5;

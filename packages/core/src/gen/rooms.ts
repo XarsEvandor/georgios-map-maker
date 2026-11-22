@@ -50,7 +50,6 @@ export const ROOM_SPECS: RoomSpec[] = [
   S({ type: "gothic.hall", label: "Entrance hall", area: [20, 42], minSide: 4, exterior: true, entrance: true, windowEvery: 3, floor: "stone" }),
   S({ type: "gothic.gallery", label: "Gallery corridor (long hall with art, rooms off its sides)", area: [60, 300], minSide: 4, maxAspect: 6, minAspect: 2.6, doorOnShortSide: true, exterior: true, entrance: true, windowEvery: 0, floor: "stone", spine: true }),
   S({ type: "gothic.vault", label: "Side vault or alcove", area: [8, 20], minSide: 3, maxAspect: 1.8, windowEvery: 0, floor: "stone" }),
-  S({ type: "gothic.vestibule", label: "Vestibule under a tower (a bare, squarish stone hall with pillars)", area: [140, 560], minSide: 9, maxAspect: 1.35, exterior: true, entrance: true, windowEvery: 0, floor: "stone" }),
   S({ type: "house.home", label: "One-room home (hearth, bed, table)", area: [9, 36], minSide: 3, exterior: true, entrance: true, windowEvery: 4, floor: "wood" }),
   S({ type: "house.living", label: "House main room (hearth, table, shelves)", area: [12, 40], minSide: 3, exterior: true, entrance: true, windowEvery: 4, floor: "wood" }),
   S({ type: "house.bedroom", label: "House bedroom", area: [8, 24], minSide: 3, maxAspect: 2, windowEvery: 4, floor: "wood" }),

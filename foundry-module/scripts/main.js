@@ -3,9 +3,9 @@
  * Opens a panel (GM only) to chat with Claude, pick a version, and build the scene.
  */
 
-import { CompanionClient, MODULE_ID, esc, handFileName, latestMap, leafFileName, miniMarkdown, renderFileName, sceneData, withLeafTextures } from "./lib.js";
+import { CompanionClient, MODULE_ID, esc, latestMap, leafFileName, miniMarkdown, renderFileName, sceneData, shadowFileName, withLeafTextures } from "./lib.js";
 import { placeCast } from "./people.js";
-import { crank, ensureSundialMacro, setHands, sundialDialog, sundialOf } from "./sundial.js";
+import { crank, ensureSundialMacro, resetSundial, setShadow, sundialDialog, sundialOf } from "./sundial.js";
 import { importDialog, importWorld, listWorlds, refreshWorldMaps } from "./worlds.js";
 import { attachStats, PEOPLE_LOOK, populate, ringUp, statsPossible } from "./people.js";
 import { registerAreaTool } from "./area-tool.js";
@@ -108,7 +108,7 @@ async function buildScene(c, mapId, versionId, opts = {}) {
   await scene.createEmbeddedDocuments("Wall", withLeafTextures(exported.scene.walls, leaves));
   await scene.createEmbeddedDocuments("AmbientLight", exported.scene.lights);
   await setShelter(scene, exported.scene.sheltered);
-  await buildSetPieces(c, scene, exported, mapId, versionId, opts);
+  await buildSetPieces(c, scene, exported, mapId, versionId);
   // The export carries the map's own darkness; the clock sets every scene's.
   await syncScenes();
   if (canvas?.scene?.id === scene.id) dropStrayRegionHighlights();
@@ -117,11 +117,11 @@ async function buildScene(c, mapId, versionId, opts = {}) {
 }
 
 /**
- * Set pieces of a map (a sundial, DESIGN 38): the hands' shadows as tiles the GM turns, the way
- * down as a pin for the GM alone that builds the place under the dial, the frozen cast as tokens,
- * and what the crank needs in the scene flags. Pieces placed before are replaced.
+ * Set pieces of a map (a sundial, DESIGN 38): the tower's shadow as a tile the GM turns, the frozen
+ * cast as tokens, and what the crank needs in the scene flags. Pieces placed before are replaced
+ * (and the pins an older build put on the map go).
  */
-async function buildSetPieces(c, scene, exported, mapId, versionId, opts) {
+async function buildSetPieces(c, scene, exported, mapId, versionId) {
   const s = exported.scene;
   const oldTiles = scene.tiles.filter((t) => t.getFlag(MODULE_ID, "sundial")).map((t) => t.id);
   if (oldTiles.length) await scene.deleteEmbeddedDocuments("Tile", oldTiles);
@@ -131,22 +131,16 @@ async function buildSetPieces(c, scene, exported, mapId, versionId, opts) {
     if (scene.getFlag(MODULE_ID, "sundial")) await scene.unsetFlag(MODULE_ID, "sundial");
     return;
   }
-  const hands = {};
-  for (const h of exported.hands ?? []) {
+  let shadow;
+  if (exported.shadow) {
     try {
-      hands[h.hand] = await upload(await c.image(h.path), handFileName(mapId, versionId, h.hand), "image/png");
+      shadow = await upload(await c.image(exported.shadow.path), shadowFileName(mapId, versionId), "image/png");
     } catch (e) {
-      console.warn(`${MODULE_ID} | sundial hand ${h.hand} not uploaded`, e);
+      console.warn(`${MODULE_ID} | sundial shadow not uploaded`, e);
     }
   }
-  const tiles = (s.tiles ?? []).filter((t) => hands[t.texture.src.slice(5)]).map((t) => ({ ...t, texture: { ...t.texture, src: hands[t.texture.src.slice(5)] } }));
+  const tiles = shadow ? (s.tiles ?? []).filter((t) => t.texture.src === "shadow").map((t) => ({ ...t, texture: { ...t.texture, src: shadow } })) : [];
   if (tiles.length) await scene.createEmbeddedDocuments("Tile", tiles);
-  // The way down: no journal entry, so only the GM sees it; double-click builds and opens the place under the dial.
-  const pins = (s.pins ?? []).map((p) => ({
-    x: p.x, y: p.y, text: p.text, texture: { src: p.icon, tint: "#dddddd" }, iconSize: 40, fontSize: 24, global: false,
-    flags: { [MODULE_ID]: { ...(p.flags?.[MODULE_ID] ?? {}), ...(p.place ? { place: p.place, city: opts.city, onDemand: true, street: false } : {}) } },
-  }));
-  if (pins.length) await scene.createEmbeddedDocuments("Note", pins);
   await placeCast(scene, s.tokens ?? [], mapId);
   await scene.setFlag(MODULE_ID, "sundial", s.flags.sundial);
   await ensureSundialMacro();
@@ -219,6 +213,16 @@ async function pageFor(journal, id, name, text, secret = false) {
   return page;
 }
 
+/** The GM's notes of a set piece: a page of the city's journal closed to players, kept up to date with the companion's text. */
+async function notesPageFor(journal, h) {
+  const id = `${h.id}:notes`;
+  const content = String(h.notes).split(/\n{2,}/).map((para) => `<p>${esc(para)}</p>`).join("");
+  const page = journal.pages.find((p) => p.getFlag(MODULE_ID, "place") === id);
+  if (!page) return journal.createEmbeddedDocuments("JournalEntryPage", [{ name: `${h.label}: GM notes`, type: "text", text: { content }, ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE }, flags: { [MODULE_ID]: { place: id, secret: true, notes: true } } }]);
+  if (page.text.content !== content) await page.update({ "text.content": content });
+  return page;
+}
+
 /** A place's pin on the city scene (shops carry their trade's icon). */
 function pinFor(h, cityKey, journal, page) {
   return {
@@ -234,9 +238,9 @@ function pinFor(h, cityKey, journal, page) {
  * opens them. 2: shops. 3: services, the underworld, the law, mansions, the garrison, stables
  * (mansions and the garrison have their own art, so the city is drawn again too).
  */
-const PINS_LOOK = 4;
+const PINS_LOOK = 5;
 
-/** Adds the pins a city scene is missing (places added since it was opened), leaving the others as they are. */
+/** Adds the pins a city scene is missing (places added since it was opened), leaving the others as they are; set pieces' GM notes too. */
 async function addNewPins(scene) {
   const cityKey = scene.getFlag(MODULE_ID, "city");
   const c = client();
@@ -244,9 +248,9 @@ async function addNewPins(scene) {
   const had = scene.getFlag(MODULE_ID, "pins") ?? 1;
   let hotspots;
   const places = had >= 3 ? await c.rpc("city.places", { city: cityKey }) : undefined;
-  // Mansions and the garrison (3), and set pieces the DM asked for (4, a sundial tower and its plaza),
+  // Mansions and the garrison (3), and set pieces the DM asked for (4 and 5, a sundial tower and its plaza),
   // change the city's art: draw it again (pins keep their places).
-  if (had < 3 || (had < 4 && places?.set)) {
+  if (had < 3 || (had < 5 && places?.set)) {
     ui.notifications.info(`Map Maker: drawing ${cityName} again with its ${had < 3 ? "mansions and garrison" : "set pieces"}, about half a minute...`);
     const info = await c.rpc("city.refresh", { city: cityKey });
     const src = await upload(await c.image(info.imagePath), `city-${info.key}-${Date.now()}.webp`);
@@ -254,16 +258,17 @@ async function addNewPins(scene) {
     await setBackground(scene, src);
     hotspots = info.hotspots;
   } else hotspots = places.hotspots;
+  const journal = game.journal.find((e) => e.getFlag(MODULE_ID, "city") === cityKey);
   const have = new Set(scene.notes.map((n) => n.getFlag(MODULE_ID, "place")).filter(Boolean));
   const fresh = hotspots.filter((h) => !have.has(h.id));
   if (fresh.length) {
-    const journal = game.journal.find((e) => e.getFlag(MODULE_ID, "city") === cityKey);
     const notes = [];
-    for (const h of fresh) notes.push(pinFor(h, cityKey, journal, journal ? await pageFor(journal, h.id, h.label, h.notes ?? `${h.label} in ${cityName}.`, !!h.secret) : undefined));
+    for (const h of fresh) notes.push(pinFor(h, cityKey, journal, journal ? await pageFor(journal, h.id, h.label, `${h.label} in ${cityName}.`, !!h.secret) : undefined));
     await scene.createEmbeddedDocuments("Note", notes);
     const secret = fresh.filter((h) => h.secret).length;
     ui.notifications.info(`Map Maker: ${fresh.length} places added to ${cityName}${secret ? ` (${secret} secret, shown only to you)` : ""}. Double-click a pin to build its map.`);
   }
+  if (journal) for (const h of hotspots.filter((x) => x.notes)) await notesPageFor(journal, h);
   await scene.setFlag(MODULE_ID, "pins", PINS_LOOK);
 }
 
@@ -332,8 +337,9 @@ async function openCity(url, name) {
   if (old.length) await scene.deleteEmbeddedDocuments("Note", old);
   const notes = [];
   for (const h of info.hotspots) {
-    const page = await pageFor(journal, h.id, h.label, h.notes ?? `${h.label} in ${info.name}.`, !!h.secret);
+    const page = await pageFor(journal, h.id, h.label, `${h.label} in ${info.name}.`, !!h.secret);
     notes.push(pinFor(h, info.key, journal, page));
+    if (h.notes) await notesPageFor(journal, h);
   }
   await scene.createEmbeddedDocuments("Note", notes);
   await scene.setFlag(MODULE_ID, "pins", PINS_LOOK);
@@ -365,7 +371,7 @@ async function buildPlace(c, cityScene, cityKey, placeId, request, folder, stree
     await scene.setFlag(MODULE_ID, "look", STREET_LOOK);
     // Townsfolk where the furniture says they would be.
     await populate(c, scene).catch((e) => console.warn(`${MODULE_ID} | townsfolk not placed on ${scene.name}`, e));
-    // The place's pin lights up: on the city scene, and on the map it was opened from (a sundial's way down).
+    // The place's pin lights up: on the city scene, and on the map it was opened from when that is another.
     for (const sc of new Set([cityScene, noteScene])) {
       const note = sc?.notes.find((n) => n.getFlag(MODULE_ID, "place") === placeId);
       if (note) await note.update({ "texture.tint": "#ffffff", [`flags.${MODULE_ID}.scene`]: scene.id });
@@ -377,7 +383,7 @@ async function buildPlace(c, cityScene, cityKey, placeId, request, folder, stree
   }
 }
 
-/** The city scene a place belongs to (its pin may sit on another map, such as a sundial's way down). */
+/** The city scene a place belongs to (its pin may sit on another map). */
 function citySceneOf(cityKey, fallback) {
   return game.scenes.find((s) => s.getFlag(MODULE_ID, "city") === cityKey && !s.getFlag(MODULE_ID, "mapId")) ?? fallback;
 }
@@ -858,8 +864,8 @@ Hooks.once("ready", () => {
       const folder = await folderFor(cityScene.getFlag(MODULE_ID, "cityName") ?? cityScene.name);
       return buildPlace(client(), cityScene, cityKey, placeId, { hotspot: placeId }, folder, undefined);
     },
-    // The sundial at the table: crank a hand, set every hand, open the little window, read a scene's sundial.
-    sundial: { crank, set: setHands, dialog: sundialDialog, of: sundialOf },
+    // The sundial at the table: crank the shadow, set it, put it back, open the little window, read a scene's sundial.
+    sundial: { crank, set: setShadow, reset: resetSundial, dialog: sundialDialog, of: sundialOf },
   };
   if (game.user.isGM && game.users.activeGM?.id === game.user.id) {
     importActors()

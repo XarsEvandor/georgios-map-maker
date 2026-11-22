@@ -409,10 +409,9 @@ export function allHotSpots(city: City, places = cityPlaces(city)): HotSpot[] {
   for (const [i, kind] of places.plots) {
     const sd = city.set?.sundial;
     if (kind === "wizard" && sd && sd.tower === i) {
-      // A sundial tower: a street map of its plaza (the dial round it), and the vestibule under the dial, for the GM only.
+      // A sundial tower: a street map of its plaza, the dial round it and the tower cut open; the GM's notes go on a page of their own.
       const c = centroid(B[i]!);
-      out.push({ id: idFor("wizard"), kind: "wizard", label: "Wizard's tower", at: c, area: boxAround(c, Math.max(60, Math.ceil(sd.radius * 2 + 30))), building: B[i]!, onDemand: true });
-      out.push({ id: idFor("wizard-below"), kind: "wizard", label: "Wizard's tower: under the dial", at: [c[0], c[1] + 14], building: B[i]!, onDemand: true, secret: true, icon: "icons/svg/cave.svg", ...(sd.notes ? { notes: sd.notes } : {}) });
+      out.push({ id: idFor("wizard"), kind: "wizard", label: "Wizard's tower", at: c, area: boxAround(c, Math.max(60, Math.ceil(sd.radius * 2 + 30))), building: B[i]!, onDemand: true, ...(sd.notes ? { notes: sd.notes } : {}) });
     } else if (kind === "wizard") out.push({ id: idFor("wizard"), kind: "wizard", label: "Wizard's tower", at: centroid(B[i]!), building: B[i]!, onDemand: true });
     if (kind === "inn") {
       const dir = places.innGates.get(i) ?? "";

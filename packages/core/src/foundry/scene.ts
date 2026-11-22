@@ -6,7 +6,7 @@
 import { PX_PER_SQUARE } from "../assets/model";
 import { parseVector2, parseVector2Array, type Vec2 } from "../ddmap/godot";
 import type { Shelter } from "../gen/layout";
-import { handRotation, type SundialOut } from "../gen/sundial";
+import { shadowRotation, type SundialOut } from "../gen/sundial";
 
 /** Foundry wall sense values (CONST.WALL_SENSE_TYPES): none 0, limited 10, normal 20. */
 const SENSE = { NONE: 0, LIMITED: 10, NORMAL: 20 } as const;
@@ -19,6 +19,8 @@ const DOOR_STATE = { closed: 0, open: 1, locked: 2 } as const;
 
 /** What the generator knows about a door (generate.ts ElementInfo), by portal node id. */
 export interface DoorMeta {
+  /** The door element's key (a sundial's gate is "sundial/gate"). */
+  key?: string;
   state?: "closed" | "locked" | "open";
   width?: number;
   leaf?: { px: number; align: "center" | "edge"; side?: [number, number]; erase?: boolean };
@@ -56,7 +58,7 @@ export interface FoundryLight {
   flags: Record<string, unknown>;
 }
 
-/** A tile the module uploads an image for (`texture.src` starts as "hand:<hand>" for a sundial's shadow). */
+/** A tile the module uploads an image for (`texture.src` starts as "shadow" for a sundial's shadow). */
 export interface FoundryTile {
   x: number;
   y: number;
@@ -66,16 +68,6 @@ export interface FoundryTile {
   alpha: number;
   sort: number;
   texture: { src: string };
-  flags: Record<string, unknown>;
-}
-
-/** A map pin for the GM alone (no journal entry): on a sundial, the way down, which builds `place` when double-clicked. */
-export interface FoundryPin {
-  x: number;
-  y: number;
-  text: string;
-  icon: string;
-  place?: string;
   flags: Record<string, unknown>;
 }
 
@@ -101,9 +93,8 @@ export interface FoundrySceneData {
   /** Where the weather stays out, as Foundry polygon points (x, y, x, y...); holes cut open sky out. The module makes one Suppress Weather region of them. */
   sheltered: Array<{ points: number[]; hole?: boolean }>;
   notes: string;
-  /** Set pieces: a sundial's hands (tiles), its way down (a pin) and the frozen cast (tokens), with what the GM's crank needs in `flags.sundial`. */
+  /** Set pieces: a sundial's shadow (a tile) and the frozen cast (tokens), with what the GM's crank needs in `flags.sundial`. */
   tiles?: FoundryTile[];
-  pins?: FoundryPin[];
   tokens?: FoundryCastToken[];
   flags?: Record<string, unknown>;
 }
@@ -126,41 +117,36 @@ export interface SceneOptions {
 }
 
 /**
- * A sundial's Foundry side: each hand's shadow as a tile twice its length, pivoting on the tower
- * (its image has the shadow on the upper half, so turning the tile turns the hand round the
- * tower); a hidden coloured light under each gem; a GM-only pin on the way down; the frozen cast as
- * tokens; and in the scene flags what the crank needs: the hands' numerals, which gem answers to
- * which hand, and the key the plaza and the vestibule share.
+ * A sundial's Foundry side: the tower's shadow as a tile twice its reach, pivoting on the tower (its
+ * image has the shadow on the upper half, from the tower's wall out, so turning the tile turns the
+ * shadow round the tower); a hidden coloured light under each gem; the frozen cast as tokens; and in
+ * the scene flags what the crank needs: where the shadow stands, how many gems burn, and the gems in
+ * their order (the GM's secret).
  */
-function sundialScene(sd: SundialOut, pps: number, dist: number): Pick<FoundrySceneData, "tiles" | "pins" | "tokens" | "flags"> & { lights: FoundryLight[] } {
+function sundialScene(sd: SundialOut, pps: number, dist: number): Pick<FoundrySceneData, "tiles" | "tokens" | "flags"> & { lights: FoundryLight[] } {
   const P = (p: [number, number]): [number, number] => [Math.round(p[0] * pps), Math.round(p[1] * pps)];
   const [cx, cy] = P(sd.at);
-  const flag = (extra: Record<string, unknown>) => ({ "georgios-map-maker": { sundial: { key: sd.key, ...extra } } });
-  const tiles: FoundryTile[] = sd.hands.map((h, i) => {
-    const L = Math.max(pps, Math.round(h.length * pps));
-    const W = Math.max(16, Math.round(h.width * pps * 2.4));
-    return { x: cx - Math.round(W / 2), y: cy - L, width: W, height: 2 * L, rotation: handRotation(h.numeral, sd.mirrored), alpha: 1, sort: 10 + i, texture: { src: `hand:${h.hand}` }, flags: flag({ hand: h.hand, numeral: h.numeral, mirrored: sd.mirrored, pivot: [cx, cy] }) };
-  });
-  const lights: FoundryLight[] = sd.gems.map((g) => {
+  const flag = (extra: Record<string, unknown>) => ({ "georgios-map-maker": { sundial: extra } });
+  const L = Math.max(pps, Math.round(sd.shadow.length * pps));
+  const W = Math.max(16, Math.round(sd.shadow.width * pps * 1.25));
+  const tiles: FoundryTile[] = [
+    { x: cx - Math.round(W / 2), y: cy - L, width: W, height: 2 * L, rotation: shadowRotation(sd.stopped), alpha: 1, sort: 10, texture: { src: "shadow" }, flags: flag({ shadow: true, numeral: sd.stopped, pivot: [cx, cy] }) },
+  ];
+  const lights: FoundryLight[] = sd.gems.map((g, i) => {
     const [x, y] = P(g.at);
     return {
       x, y, hidden: true,
       config: { dim: dist * 3, bright: dist, color: g.rgb, alpha: 0.7, attenuation: 0.5, luminosity: 0.6, animation: { type: "pulse", speed: 2, intensity: 4 }, darkness: { min: 0, max: 1 } },
-      flags: flag({ gem: g.numeral, color: g.color, hand: g.hand }),
+      flags: flag({ gem: g.numeral, color: g.color, order: i + 1 }),
     };
   });
-  const pins: FoundryPin[] = [];
-  if (sd.door) {
-    const [x, y] = P(sd.door);
-    pins.push({ x, y, text: "The way down (the hour shadow's tip)", icon: "icons/svg/cave.svg", ...(sd.belowPlace ? { place: sd.belowPlace } : {}), flags: flag({ door: true }) });
-  }
   const tokens: FoundryCastToken[] = (sd.cast ?? []).map((m) => ({
     name: m.name, kind: m.kind, x: Math.round((m.x - 0.5) * pps), y: Math.round((m.y - 0.5) * pps),
     // Token art faces down the image: rotation 0 is facing south, turning clockwise.
     rotation: Math.round(((Math.atan2(-m.facing[0], m.facing[1]) * 180) / Math.PI + 360) % 360),
   }));
-  const flags = { sundial: { key: sd.key, mirrored: sd.mirrored, stopped: sd.stopped, pivot: [cx, cy], radius: Math.round(sd.radius * pps), gems: sd.gems.map((g) => ({ numeral: g.numeral, color: g.color, hand: g.hand })) } };
-  return { tiles, lights, pins, tokens, flags };
+  const flags = { sundial: { stopped: sd.stopped, shadow: sd.stopped, progress: 0, pivot: [cx, cy], radius: Math.round(sd.radius * pps), gems: sd.gems.map((g) => ({ numeral: g.numeral, color: g.color })) } };
+  return { tiles, lights, tokens, flags };
 }
 
 function argbToHex(argb: string): string {
@@ -222,7 +208,7 @@ export function toFoundryScene(map: Record<string, any>, opts: SceneOptions): Fo
           sound: SENSE.NORMAL,
           door: piece.door && !isWindow ? DOOR.DOOR : DOOR.NONE,
           ds,
-          flags: { "georgios-map-maker": { wall: w.node_id, portal: piece.door?.id } },
+          flags: { "georgios-map-maker": { wall: w.node_id, portal: piece.door?.id, ...(meta?.key === "sundial/gate" ? { sundial: { gate: true } } : {}) } },
         };
         // Gates: Foundry draws the closed leaves and swings them open.
         if (piece.door && meta?.leaf) {
@@ -274,7 +260,7 @@ export function toFoundryScene(map: Record<string, any>, opts: SceneOptions): Fo
     lights: dial ? [...lights, ...dial.lights] : lights,
     sheltered: (opts.sheltered ?? []).map((sh) => ({ points: polygonPoints(sh.points, opts.pps), ...(sh.hole ? { hole: true } : {}) })).filter((sh) => sh.points.length >= 6),
     notes: opts.credit ?? "Map assets: 2-Minute Tabletop (CC BY-NC 4.0). Built with Georgios' Map Maker.",
-    ...(dial ? { tiles: dial.tiles, pins: dial.pins, tokens: dial.tokens, flags: dial.flags } : {}),
+    ...(dial ? { tiles: dial.tiles, tokens: dial.tokens, flags: dial.flags } : {}),
   };
 }
 

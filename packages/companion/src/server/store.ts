@@ -235,26 +235,28 @@ export class MapStore {
   exportScene(id: string, version?: string, pps = 100): FoundrySceneData {
     const s = this.get(id);
     const v = this.version(id, version);
-    const doors = Object.fromEntries(Object.entries(v.elements).filter(([, e]) => e.kind === "door").map(([nid, e]) => [nid, { state: e.state, width: e.width, leaf: e.leaf }]));
+    const doors = Object.fromEntries(Object.entries(v.elements).filter(([, e]) => e.kind === "door").map(([nid, e]) => [nid, { key: e.key, state: e.state, width: e.width, leaf: e.leaf }]));
     const decorative = new Set(Object.entries(v.elements).filter(([, e]) => e.kind === "wall" && /^(quay|pier)#/.test(e.key)).map(([nid]) => nid));
     return toFoundryScene(v.map, { name: `${s.plan.title ?? s.id} (${v.name})`, pps, doors, decorative, sheltered: v.sheltered ?? shelterOf(s.gen.layout), sundial: v.sundial });
   }
 
   /**
-   * A sundial hand's shadow as a PNG for its Foundry tile: the image is twice the hand's length,
-   * the shadow on its upper half from the middle (the tower) up, soft-edged, darkest at the tower.
+   * A sundial tower's shadow as a PNG for its Foundry tile: the image is twice the shadow's reach,
+   * the shadow on its upper half from the tower's wall out to its tip, as wide as the tower at the
+   * wall and narrowing a little, soft-edged, darkest at the wall.
    */
-  async handPng(id: string, version: string | undefined, hand: string, pps = 100): Promise<Buffer> {
+  async shadowPng(id: string, version: string | undefined, pps = 100): Promise<Buffer> {
     const v = this.version(id, version);
-    const h = v.sundial?.hands.find((x) => x.hand === hand);
-    if (!h) throw new Error(`map ${id} has no ${hand} hand`);
-    const L = Math.max(pps, Math.round(h.length * pps)), W = Math.max(16, Math.round(h.width * pps * 2.4));
-    const bw = Math.max(3, h.width * pps), cx = W / 2;
+    const sh = v.sundial?.shadow;
+    if (!sh) throw new Error(`map ${id} has no sundial`);
+    const L = Math.max(pps, Math.round(sh.length * pps)), W = Math.max(16, Math.round(sh.width * pps * 1.25));
+    const cx = W / 2, yWall = L - sh.from * pps, yTip = Math.max(2, L * 0.03);
+    const wallHalf = (sh.width * pps) / 2, tipHalf = wallHalf * 0.6;
+    const f = (n: number) => n.toFixed(1);
     const svg = `<svg width="${W}" height="${2 * L}" xmlns="http://www.w3.org/2000/svg">`
-      + `<defs><linearGradient id="g" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#0b0a10" stop-opacity="${h.alpha.toFixed(2)}"/><stop offset="0.85" stop-color="#0b0a10" stop-opacity="${(h.alpha * 0.8).toFixed(2)}"/><stop offset="1" stop-color="#0b0a10" stop-opacity="0"/></linearGradient></defs>`
-      + `<rect x="${(cx - bw / 2).toFixed(1)}" y="${(L * 0.04).toFixed(1)}" width="${bw.toFixed(1)}" height="${(L * 0.96).toFixed(1)}" rx="${(bw / 2).toFixed(1)}" fill="url(#g)"/>`
-      + `<circle cx="${cx}" cy="${L}" r="${(bw * 0.9).toFixed(1)}" fill="#0b0a10" fill-opacity="${h.alpha.toFixed(2)}"/></svg>`;
-    return sharp(Buffer.from(svg)).blur(Math.max(0.6, bw * 0.18)).png().toBuffer();
+      + `<defs><linearGradient id="g" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#0b0a10" stop-opacity="${sh.alpha.toFixed(2)}"/><stop offset="0.8" stop-color="#0b0a10" stop-opacity="${(sh.alpha * 0.8).toFixed(2)}"/><stop offset="1" stop-color="#0b0a10" stop-opacity="0"/></linearGradient></defs>`
+      + `<path d="M${f(cx - wallHalf)} ${f(yWall)} L${f(cx + wallHalf)} ${f(yWall)} L${f(cx + tipHalf)} ${f(yTip + tipHalf)} A${f(tipHalf)} ${f(tipHalf)} 0 0 0 ${f(cx - tipHalf)} ${f(yTip + tipHalf)} Z" fill="url(#g)"/></svg>`;
+    return sharp(Buffer.from(svg)).blur(Math.max(0.8, wallHalf * 0.08)).png().toBuffer();
   }
 
   /** Townsfolk for a built map, in scene pixels (token top-left corners), with the way each faces as a token rotation. */

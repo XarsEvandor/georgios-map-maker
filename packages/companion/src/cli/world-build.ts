@@ -9,6 +9,7 @@
  * stage writes only that again.
  */
 
+import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -74,7 +75,9 @@ if (has("render")) {
   const index = await loadIndex("data/asset-index.json");
   const img = await renderWorld(az, aged, new AssetSource(index), index);
   await writeFile(join(dir, "map.webp"), img.image);
-  await writeFile(join(dir, "map.json"), JSON.stringify({ width: img.width, height: img.height, scale: img.scale }));
+  // A fingerprint of the picture: the module redraws an imported world map when it changes.
+  const v = createHash("sha1").update(img.image).digest("hex").slice(0, 12);
+  await writeFile(join(dir, "map.json"), JSON.stringify({ width: img.width, height: img.height, scale: img.scale, v }));
   log(`map ${img.width}x${img.height}`);
 }
 

@@ -137,6 +137,8 @@ export class CompanionServer {
           // Towns to pass through, in order; at most six.
           via: Array.isArray(p.via) ? p.via.slice(0, 6).map((v: unknown) => String(v ?? "").slice(0, 120)) : [],
           land: p.land === true,
+          // Or the towns by id, in order (clicked on the map); at most eight.
+          ids: Array.isArray(p.towns) ? p.towns.slice(0, 8).map(Number).filter((n: number) => Number.isInteger(n) && n > 0) : undefined,
         });
       case "dd.open": {
         const file = s.mapFile(String(p.mapId), p.version);

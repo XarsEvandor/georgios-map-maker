@@ -37,7 +37,8 @@ export interface WorldBundle {
   title: string;
   year: number;
   era: string;
-  image: { file: string; width: number; height: number };
+  /** v: a fingerprint of the picture; the module refreshes an imported world map when it changes. */
+  image: { file: string; width: number; height: number; v?: string };
   /** Scene grid: pixels per square and miles per square. */
   grid: { size: number; distance: number; units: string };
   folders: string[];
@@ -49,7 +50,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const paras = (text: string) => text.split(/\n\s*\n/).map((p) => `<p>${esc(p.trim())}</p>`).join("");
 const list = (items: string[]) => (items.length ? `<ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : "");
 
-export function buildBundle(az: AzWorld, w: AgedWorld, prose: Prose | undefined, o: { id: string; title: string; map: { width: number; height: number; scale: number }; lore?: WorldLore }): WorldBundle {
+export function buildBundle(az: AzWorld, w: AgedWorld, prose: Prose | undefined, o: { id: string; title: string; map: { width: number; height: number; scale: number; v?: string }; lore?: WorldLore }): WorldBundle {
   const n = namer(w);
   const cells = az.cells.map((c) => c.p);
   const line = (e: Parameters<typeof eventText>[0]) => eventText(e, n, cells);
@@ -157,7 +158,7 @@ export function buildBundle(az: AzWorld, w: AgedWorld, prose: Prose | undefined,
 
   return {
     format: "gmm-world", version: 1, id: o.id, title: o.title, year: w.year, era: w.eraShort,
-    image: { file: "map.webp", width: o.map.width, height: o.map.height },
+    image: { file: "map.webp", width: o.map.width, height: o.map.height, ...(o.map.v ? { v: o.map.v } : {}) },
     // One Azgaar pixel is az.kmPerPx km; a square of 100 image pixels.
     grid: { size: 100, distance: Math.round(((100 / S) * az.kmPerPx * 0.621) * 10) / 10, units: "mi" },
     folders: ["Realms", "Towns", "Villages", "Ruins", "Battlefields"],

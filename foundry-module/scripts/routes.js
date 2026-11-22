@@ -2,9 +2,11 @@
  * Ways on the world map. The companion measures the way between towns (through other towns when
  * asked, by land only when asked) and this draws it on the world map scene: a pale halo, the way
  * coloured by kind (red road, orange trail, blue sea, brown open ground), a dot on each town asked
- * for (green start, gold stops, red end) and a label. The drawings are hidden from players until the
- * GM reveals them (the Route tool's "players see it", or the drawing HUD's eye), and flagged, so the next way replaces them and Clear
- * removes them. "Here" is the town of the scene the GM has open.
+ * for (green start, gold stops, red end) and a label. The drawings are hidden from players until
+ * the GM reveals them (the Route dialog's "players see it", or the drawing HUD's eye), and
+ * flagged, so the next way replaces them and Clear removes them. The towns come by name (the
+ * dialog, other modules) or by clicks on the world map (the Route tool: start, stops, end).
+ * "Here" is the town of the scene the GM has open.
  */
 
 import { MODULE_ID, esc } from "./lib.js";
@@ -78,7 +80,7 @@ function dotData([x, y], color, size) {
  * @param {string} world
  * @param {{ from: string, to: string, via?: string[], miles: number, points: number[][], steps: string[], stops: Array<{name: string, point: number[]}> }} route
  */
-export async function drawRoute(world, route, { land = false, reveal = false } = {}) {
+export async function drawRoute(world, route, { land = false, reveal = false, pan = true } = {}) {
   const scene = worldMapOf(world);
   if (!scene) return undefined;
   await clearRoute(world);
@@ -104,11 +106,130 @@ export async function drawRoute(world, route, { land = false, reveal = false } =
   shapes.push({
     x: ex - boxW / 2, y: ey - dot - boxH, shape: { type: "r", width: boxW, height: boxH }, fillType: CONST.DRAWING_FILL_TYPES.NONE, strokeWidth: 0,
     text, fontSize, textColor: "#fff6de", textAlpha: 1,
+    // The label carries the trip, for drawnRoute (Georgios Scribbler's assistant reads it).
+    _trip: { stops: route.stops.map((s) => s.name), land: !!land, miles: Math.round(route.miles) },
   });
   const top = Math.max(0, ...scene.drawings.map((d) => d.sort ?? 0)) + 1;
-  await scene.createEmbeddedDocuments("Drawing", shapes.map((s, i) => ({ ...s, hidden: !reveal, sort: top + i, author: game.user.id, flags })));
-  if (canvas.scene?.id === scene.id) await panTo(route.points);
+  await scene.createEmbeddedDocuments("Drawing", shapes.map(({ _trip, ...s }, i) => ({
+    ...s, hidden: !reveal, sort: top + i, author: game.user.id, flags: _trip ? { [MODULE_ID]: { ...flags[MODULE_ID], trip: _trip } } : flags,
+  })));
+  if (pan && canvas.scene?.id === scene.id) await panTo(route.points);
   return { scene: scene.id, name: scene.name, revealed: !!reveal };
+}
+
+/** The way drawn on a world map now: { stops, land, miles, scene }, or undefined. */
+export function drawnRoute(world) {
+  for (const scene of game.scenes.filter((s) => flag(s, "worldMap") && (!world || flag(s, "world") === world))) {
+    const label = scene.drawings.find((d) => d.getFlag(MODULE_ID, "trip"));
+    if (label) return { ...label.getFlag(MODULE_ID, "trip"), scene: scene.name };
+  }
+  return undefined;
+}
+
+/** The way drawn now, in words: "Narkoc → Borgzah → Zugkatil, 76 mi, by land". */
+export function drawnRouteText(world) {
+  const r = drawnRoute(world);
+  return r ? `${r.stops.join(" → ")}, ${r.miles} mi${r.land ? ", by land" : ""}` : "";
+}
+
+// ---- Clicking towns on the world map (the Route tool). ----
+
+/** The trip being clicked: its world and its towns, in order; and whether it keeps off boats. */
+const trip = { world: undefined, towns: [], land: false };
+let marker = null;
+
+function clearMarker() {
+  if (marker && !marker.destroyed) marker.destroy();
+  marker = null;
+}
+
+/** A green dot on the start while it is the only town clicked (on the canvas only, not saved). */
+function showMarker(point) {
+  clearMarker();
+  const layer = canvas.georgios;
+  if (!layer) return;
+  const g = canvas.scene?.grid.size || 100;
+  marker = layer.addChild(new PIXI.Graphics());
+  marker.lineStyle(Math.max(2, Math.round(g * 0.07)), 0xffffff, 1).beginFill(0x1e8f3a, 1).drawCircle(point[0], point[1], g * 0.28).endFill();
+}
+
+/** The town pin nearest a point of a world map scene, when one is close. */
+export function townAt(scene, { x, y }) {
+  const reach = Math.max(60, (scene.grid?.size || 100) * 1.1);
+  let best;
+  for (const n of scene.notes) {
+    const key = n.getFlag(MODULE_ID, "key");
+    if (typeof key !== "string" || !key.startsWith("town-")) continue;
+    const d = Math.hypot(n.x - x, n.y - y);
+    if (d <= reach && (!best || d < best.d)) best = { d, id: Number(key.slice(5)), name: n.text, x: n.x, y: n.y };
+  }
+  return best;
+}
+
+/** By land only, for clicked trips (the Route group's toggle). */
+export const tripLand = {
+  get: () => trip.land,
+  async set(on, ctx) {
+    trip.land = !!on;
+    if (trip.towns.length >= 2) await drawTrip(ctx);
+  },
+};
+
+/**
+ * A click with the Route tool: the town there joins the trip as its new end (the end before it
+ * becomes a stop), and the way is drawn again. Shift starts a new trip from that town.
+ * @param {{x: number, y: number}} point  the click, in scene pixels
+ * @param {{ fresh?: boolean, route: Function, t: Function }} ctx
+ */
+export async function tripClick(point, { fresh = false, ...ctx }) {
+  const scene = canvas.scene;
+  if (!flag(scene, "worldMap")) return ui.notifications.warn(ctx.t("Route.NotWorldMap"));
+  const town = townAt(scene, point);
+  if (!town) return ui.notifications.warn(ctx.t("Route.NoTown"));
+  const world = flag(scene, "world");
+  if (fresh || trip.world !== world) {
+    if (fresh && trip.world) await clearRoute(trip.world);
+    trip.world = world;
+    trip.towns = [];
+  }
+  if (trip.towns.at(-1)?.id === town.id) return;
+  trip.towns.push(town);
+  return drawTrip(ctx);
+}
+
+/** A right-click with the Route tool: the last town clicked leaves the trip. */
+export async function tripBack(ctx) {
+  if (!trip.towns.length) return;
+  trip.towns.pop();
+  return drawTrip(ctx);
+}
+
+/** The Route tool was put away: the start marker goes (the drawn way stays). */
+export function tripOff() {
+  clearMarker();
+}
+
+async function drawTrip({ route, t }) {
+  const towns = trip.towns;
+  if (towns.length < 2) {
+    await clearRoute(trip.world);
+    if (towns.length === 1) {
+      showMarker([towns[0].x, towns[0].y]);
+      ui.notifications.info(game.i18n.format("GMM.Route.Started", { town: towns[0].name }));
+    } else clearMarker();
+    return;
+  }
+  let answer;
+  try {
+    answer = await route({ towns: towns.map((x) => x.id), land: trip.land, image: false, draw: true, pan: false });
+  } catch (e) {
+    return ui.notifications.error(`Map Maker: ${e.message}`);
+  }
+  clearMarker();
+  if (!answer.found) return ui.notifications.warn(answer.text);
+  const r = answer.route;
+  const kinds = Object.entries(r.byKind).map(([k, v]) => `${k} ${Math.round(v)}`).join(", ");
+  ui.notifications.info(`${r.from} → ${r.to}${r.via?.length ? ` (via ${r.via.join(", ")})` : ""}: ${Math.round(r.miles)} mi${trip.land ? ", by land" : ""} (${kinds})`);
 }
 
 /** Pans and zooms the canvas so the whole way shows. */

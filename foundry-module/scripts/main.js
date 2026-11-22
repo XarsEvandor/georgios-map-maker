@@ -4,12 +4,12 @@
  */
 
 import { CompanionClient, MODULE_ID, esc, latestMap, leafFileName, miniMarkdown, renderFileName, sceneData, withLeafTextures } from "./lib.js";
-import { importDialog, importWorld, listWorlds } from "./worlds.js";
+import { importDialog, importWorld, listWorlds, refreshWorldMaps } from "./worlds.js";
 import { attachStats, PEOPLE_LOOK, populate, ringUp, statsPossible } from "./people.js";
 import { registerAreaTool } from "./area-tool.js";
 import { backgroundOf, registerClock, ROOFS_LOOK, syncScenes } from "./clock.js";
 import { offerStart, openCompanions } from "./launcher.js";
-import { clearRoute, drawRoute, hereOf, routeDialog, showRoute, worldOf } from "./routes.js";
+import { clearRoute, drawnRouteText, drawRoute, hereOf, routeDialog, showRoute, tripBack, tripClick, tripLand, tripOff, worldOf } from "./routes.js";
 
 const t = (key) => game.i18n.localize(`GMM.${key}`);
 
@@ -24,21 +24,24 @@ async function companionFetch(...args) {
 }
 
 /**
- * The way between two towns of the world imported here, through `via` towns in order, by land only
- * when `land`; for the Route tool and other modules (Georgios Scribbler's assistant asks it about
- * journeys): { found, text, route, image: { media_type, data }, unknown } from the companion, plus
- * `drawn: { scene, name, revealed }` when `draw` put it on the world map (replacing the way drawn
- * before; hidden from the players unless `reveal`).
+ * The way between two towns of the world imported here, through `via` towns in order (or `towns`:
+ * town ids in order, as clicked on the map), by land only when `land`; for the Route tools and
+ * other modules (Georgios Scribbler's assistant asks it about journeys): { found, text, route,
+ * image: { media_type, data }, unknown } from the companion, plus `drawn: { scene, name, revealed }`
+ * when `draw` put it on the world map (replacing the way drawn before; hidden from the players
+ * unless `reveal`; the view moves to it unless `pan` is false).
  * The world is the current scene's (world map, city or place), else the one imported here.
  */
-async function route({ from, to, via = [], land = false, image = true, draw = false, reveal = false } = {}) {
+async function route({ from = "", to = "", via = [], towns, land = false, image = true, draw = false, reveal = false, pan = true } = {}) {
   const worlds = [...new Set(game.scenes.map((s) => s.getFlag(MODULE_ID, "world")).filter(Boolean))];
   const world = worldOf(canvas.scene) ?? worlds[0];
   if (!world) return { found: false, text: "No Map Maker world is imported into this Foundry world, so there is no map to measure." };
-  const answer = await client().rpc("maps.route", { world, from, to, via: Array.isArray(via) ? via : [via].filter(Boolean), land: !!land, image });
+  const answer = await client().rpc("maps.route", {
+    world, from, to, via: Array.isArray(via) ? via : [via].filter(Boolean), ...(Array.isArray(towns) ? { towns } : {}), land: !!land, image,
+  });
   if (draw && answer.found && game.user.isGM) {
-    answer.drawn = await drawRoute(world, answer.route, { land });
-    if (answer.drawn) answer.text += `\nThe way is drawn on the world map in Foundry ("${answer.drawn.name}"), hidden from the players until the GM reveals it.`;
+    answer.drawn = await drawRoute(world, answer.route, { land, reveal, pan });
+    if (answer.drawn) answer.text += `\nThe way is drawn on the world map in Foundry ("${answer.drawn.name}"), ${reveal ? "where the players see it too" : "hidden from the players until the GM reveals it"}.`;
   }
   return answer;
 }
@@ -777,17 +780,28 @@ Hooks.once("init", () => {
   game.settings.registerMenu(MODULE_ID, "importWorld", { name: "GMM.ImportWorld", label: "GMM.ImportWorldLabel", hint: "GMM.ImportWorldHint", icon: "fa-solid fa-earth-europe", type: ImportWorldMenu, restricted: true });
   // The left toolbar's "Georgios' Modules" group: the "Map an area" tool and the panel button
   // (Georgios Scribbler adds its buttons to the same group).
-  registerAreaTool({ openPanel, onArea: buildArea, t, openCompanions, openRoute: () => routeDialog(route, t) });
+  registerAreaTool({
+    openPanel, onArea: buildArea, t, openCompanions,
+    routes: {
+      byName: () => routeDialog(route, t),
+      click: (point, fresh) => tripClick(point, { fresh, route, t }),
+      back: () => tripBack({ route, t }),
+      off: tripOff,
+      land: { get: tripLand.get, set: (on) => tripLand.set(on, { route, t }) },
+    },
+  });
   // The clock bar at the top, and every scene's light following it.
   registerClock();
 });
 
 Hooks.once("ready", () => {
-  game.modules.get(MODULE_ID).api = { open: openPanel, buildScene: (mapId, version) => buildScene(client(), mapId, version), openCity, importWorld, importDialog, listWorlds, populate: (scene = canvas.scene) => populate(client(), scene), route, clearRoute, showRoute, here: () => hereOf() };
+  game.modules.get(MODULE_ID).api = { open: openPanel, buildScene: (mapId, version) => buildScene(client(), mapId, version), openCity, importWorld, importDialog, listWorlds, populate: (scene = canvas.scene) => populate(client(), scene), route, clearRoute, showRoute, here: () => hereOf(), drawnRoute: () => drawnRouteText() };
   if (game.user.isGM && game.users.activeGM?.id === game.user.id) {
     importActors()
       .then(() => importUpdates())
       .catch((e) => console.error(`${MODULE_ID} | imports`, e));
+    // A world map the companion drew again shows its new picture.
+    refreshWorldMaps().catch((e) => console.error(`${MODULE_ID} | world map refresh`, e));
   }
 });
 

@@ -84,9 +84,15 @@ Layouts are cached in `data/cities`. Watabou's generators are free to use, gener
 
 ## Routes on the world map
 
-Pick **Route** in the left toolbar's **Georgios' Modules** group (the lion). Name the town to start from (the open scene's town is filled in), any towns to pass through in order, and the town to reach; tick **By land only** to keep off boats. **Draw the way** measures the shortest way along the world's roads, trails and sea lanes, shows it in words (miles of each kind, towns, realms and terrain on the way) and draws it on the world map: a red road, an orange trail, a blue sea lane, brown open ground, a green dot at the start, gold dots on the towns asked for and a red one at the end. The players don't see it unless **The players see it too** is ticked (or the GM reveals it later from the drawing's HUD). A new way replaces the old one; **Clear the way** removes it. The companion must be running.
+On the world map, pick **Route** in the left toolbar's **Georgios' Modules** group (the lion) and click towns: the first is the start, the last you clicked is the end, and the ones between are stops on the way. After each click the shortest way along the world's roads, trails and sea lanes is drawn again and its length shown. Right-click takes back the last town; Shift-click starts a new route. The **By land only** toggle beside it keeps routes off boats.
 
-Other modules can ask too: `api.route({ from, to, via, land, draw, reveal })` returns the way in words and, with `draw`, puts it on the map; `api.clearRoute()`, `api.showRoute()` and `api.here()` (the open scene's town) go with it. Georgios Scribbler's assistant uses them: "from here to Zugkatil", "now through Tigh".
+**Route by name** does the same from names: the town to start from (the open scene's town is filled in), towns to pass through in order, and the town to reach. It shows the way in words (miles of each kind, towns, realms and terrain on the way).
+
+The way is drawn on the world map: a red road, an orange trail, a blue sea lane, brown open ground, a green dot at the start, gold dots on the stops and a red one at the end, with a label. The players don't see it unless **The players see it too** is ticked in Route by name (or the GM reveals it from the drawing's HUD). A new way replaces the old one; **Clear the way** in Route by name removes it. The companion must be running.
+
+Other modules can ask too: `api.route({ from, to, via, towns, land, draw, reveal })` returns the way in words and, with `draw`, puts it on the map; `api.clearRoute()`, `api.showRoute()`, `api.here()` (the open scene's town) and `api.drawnRoute()` (the way drawn now, in words) go with it. Georgios Scribbler's assistant uses them: "from here to Zugkatil", "now through Tigh", "how many rations for this route?".
+
+Each realm on the world map has a colour of its own, picked from twelve so that neighbours look clearly different (an invader the DM steered in keeps its own); the colour washes over its land, deepens along its borders and tints its name. A world map drawn again (`world-build --stage render,bundle`) replaces the picture in Foundry the next time the GM loads the world; pins, journals and drawings stay.
 
 ## Command line
 

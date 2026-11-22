@@ -101,15 +101,24 @@ export interface RouteAnswer {
 
 /**
  * The way from one town to another, through `via` towns in order when asked; `land`: never by boat
- * (then there is no second, by-land way to offer).
+ * (then there is no second, by-land way to offer). `ids` names the towns by id instead, in order
+ * (the GM clicked them on the map, so a namesake is never mistaken for another).
  */
-export async function worldRoute(dataDir: string, world: string, from: string, to: string, o: { image?: boolean; via?: string[]; land?: boolean } = {}): Promise<RouteAnswer> {
+export async function worldRoute(dataDir: string, world: string, from: string, to: string, o: { image?: boolean; via?: string[]; land?: boolean; ids?: number[] } = {}): Promise<RouteAnswer> {
   const w = await load(dataDir, world);
-  const names = [from, ...(o.via ?? []).filter((v) => v.trim()), to];
-  const found = names.map((n) => findTown(w.aged, n));
-  const unknown = names.map((name, i) => ({ name, t: found[i]! })).filter((x) => !x.t.town).map((x) => ({ name: x.name, suggestions: x.t.suggestions }));
-  if (unknown.length) return { found: false, unknown, text: unknown.map((u) => `No town called "${u.name}" on the map${u.suggestions.length ? `; the nearest names: ${u.suggestions.join(", ")}` : ""}.`).join("\n") };
-  const towns = found.map((t) => t.town!);
+  let towns: Array<NonNullable<RouteWorld["burgs"][number]>>;
+  if (o.ids?.length) {
+    const byId = new Map(w.aged.burgs.filter((b): b is NonNullable<typeof b> => !!b).map((b) => [b.id, b]));
+    const missing = o.ids.filter((id) => !byId.has(id));
+    if (missing.length) return { found: false, text: `No town with the id ${missing.join(", ")} on the map.` };
+    towns = o.ids.map((id) => byId.get(id)!);
+  } else {
+    const names = [from, ...(o.via ?? []).filter((v) => v.trim()), to];
+    const found = names.map((n) => findTown(w.aged, n));
+    const unknown = names.map((name, i) => ({ name, t: found[i]! })).filter((x) => !x.t.town).map((x) => ({ name: x.name, suggestions: x.t.suggestions }));
+    if (unknown.length) return { found: false, unknown, text: unknown.map((u) => `No town called "${u.name}" on the map${u.suggestions.length ? `; the nearest names: ${u.suggestions.join(", ")}` : ""}.`).join("\n") };
+    towns = found.map((t) => t.town!);
+  }
   const route = findJourney(w.aged, towns, w.scale, { land: !!o.land });
   if (!route) return { found: false, text: `${towns[0]!.name} and ${towns.at(-1)!.name} are the same town.` };
   const land = route.byKind.sea && !o.land ? findJourney(w.aged, towns, w.scale, { land: true }) : null;

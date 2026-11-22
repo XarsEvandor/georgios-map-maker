@@ -66,9 +66,9 @@ export async function importWorld(path, { activate = true } = {}) {
   const sceneFolder = game.folders.find((f) => f.type === "Scene" && f.getFlag(MODULE_ID, "world") === b.id) ?? (await Folder.create({ name: b.title, type: "Scene", flags }));
   // A cache-busting query, so a re-render shows at once.
   const data = {
-    name: b.title, folder: sceneFolder.id, width: b.image.width, height: b.image.height, padding: 0, background: { src: `${src}?v=${Date.now()}` },
+    name: b.title, folder: sceneFolder.id, width: b.image.width, height: b.image.height, padding: 0, background: { src: `${src}?v=${b.image.v ?? Date.now()}` },
     grid: { type: 1, size: b.grid.size, distance: b.grid.distance, units: b.grid.units, alpha: 0 }, tokenVision: false, environment: { darknessLevel: 0 },
-    flags: { [MODULE_ID]: { world: b.id, worldMap: true } },
+    flags: { [MODULE_ID]: { world: b.id, worldMap: true, imageV: b.image.v ?? null } },
   };
   // Re-imports update the world map in place: cities opened from it keep their way back.
   let scene = game.scenes.find((s) => s.getFlag(MODULE_ID, "world") === b.id && s.getFlag(MODULE_ID, "worldMap"));
@@ -93,6 +93,36 @@ export async function importWorld(path, { activate = true } = {}) {
   await scene.view();
   ui.notifications.info(`Map Maker: ${b.title} imported (${made.length} journals, ${notes.length} pins).`);
   return scene;
+}
+
+/**
+ * A world map redrawn by the companion (the bundle's picture has a new fingerprint) shows the new
+ * picture: only the scene's background changes; pins, journals and drawings stay. Run by the GM on
+ * load. Returns the names of the scenes refreshed.
+ */
+export async function refreshWorldMaps() {
+  if (!game.user.isGM) return [];
+  const done = [];
+  for (const scene of game.scenes.filter((s) => s.getFlag(MODULE_ID, "worldMap") && s.getFlag(MODULE_ID, "world"))) {
+    const id = scene.getFlag(MODULE_ID, "world");
+    let b;
+    try {
+      b = await fetch(`${ROOT}/${id}/bundle.json`, { cache: "no-store" }).then((r) => r.json());
+    } catch {
+      continue; // No bundle here (moved or deleted): leave the scene alone.
+    }
+    const v = b?.image?.v;
+    if (!v || scene.getFlag(MODULE_ID, "imageV") === v) continue;
+    const src = `${ROOT}/${id}/${b.image.file}?v=${v}`;
+    await scene.update({ "background.src": src, [`flags.${MODULE_ID}.imageV`]: v });
+    if (scene.levels) {
+      const level = scene.levels.get(scene._source.initialLevel) ?? scene.levels.contents[0];
+      if (level) await level.update({ "background.src": src });
+    }
+    done.push(scene.name);
+  }
+  if (done.length) ui.notifications.info(`Map Maker: the world map was redrawn (${done.join(", ")}).`);
+  return done;
 }
 
 /** A dialog listing the bundles, with an Import button for each. */

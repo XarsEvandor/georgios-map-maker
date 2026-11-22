@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 // @ts-expect-error plain JS module without types
-import { clearRoute, drawRoute, hereOf, worldOf } from "../../../foundry-module/scripts/routes.js";
+import { clearRoute, drawnRouteText, drawRoute, hereOf, townAt, tripBack, tripClick, tripLand, worldOf } from "../../../foundry-module/scripts/routes.js";
 
 const OWN = "georgios-map-maker";
 
@@ -76,8 +76,68 @@ describe("the way drawn on the world map", () => {
     expect(mine.length).toBe(1 + 3 + 2 + 1);
     expect(mine.every((d) => d.hidden === false)).toBe(true);
     expect(mine.at(-1)!.text).toBe("Zugkatil → Glukkhar: 376 mi, by land");
+    expect(drawnRouteText()).toBe("Zugkatil → Glukkhar, 376 mi, by land");
     expect(await clearRoute()).toBe(7);
     expect(worldMap.drawings.map((d) => d.id)).toEqual(["mine"]);
+    expect(drawnRouteText()).toBe("");
     expect(await drawRoute("no-such-world", route)).toBeUndefined();
+  });
+});
+
+describe("clicking a route on the world map", () => {
+  const pin = (id: number, name: string, x: number, y: number) => ({ x, y, text: name, getFlag: (_m: string, k: string) => (k === "key" ? `town-${id}` : undefined) });
+  const notes = [pin(1, "Narkoc", 1000, 1000), pin(2, "Borgzah", 1100, 900), pin(3, "Zugkatil", 1000, 200), { x: 1010, y: 1010, text: "Old battle", getFlag: () => "battle-1" }];
+  const said: string[] = [];
+  const asked: Array<Record<string, unknown>> = [];
+  const ctx = {
+    t: (k: string) => k,
+    route: async (o: Record<string, unknown>) => {
+      asked.push(o);
+      return { found: true, route: { from: "A", to: "B", miles: 10, byKind: { road: 10 } } };
+    },
+  };
+  const click = (x: number, y: number, fresh = false) => tripClick({ x, y }, { fresh, ...ctx });
+
+  beforeEach(() => {
+    Object.assign(worldMap, { notes });
+    said.length = 0;
+    asked.length = 0;
+    const note = (m: string) => said.push(m);
+    Object.assign(globalThis, {
+      canvas: { scene: worldMap, georgios: { addChild: (g: unknown) => g } },
+      ui: { notifications: { info: note, warn: note, error: note } },
+      PIXI: { Graphics: class { destroyed = false; lineStyle() { return this; } beginFill() { return this; } drawCircle() { return this; } endFill() { return this; } destroy() { this.destroyed = true; } } },
+    });
+    (globalThis as any).game.i18n = { format: (k: string, d: Record<string, string>) => `${k}:${d.town}` };
+  });
+
+  it("finds the town pin nearest the click, and nothing far from every town", () => {
+    expect(townAt(worldMap, { x: 1030, y: 1020 })).toMatchObject({ id: 1, name: "Narkoc" });
+    expect(townAt(worldMap, { x: 1070, y: 930 })).toMatchObject({ id: 2, name: "Borgzah" });
+    expect(townAt(worldMap, { x: 1500, y: 500 })).toBeUndefined();
+  });
+
+  it("starts at the first town clicked, ends at the last, passes the ones between; right-click takes one back", async () => {
+    await click(1005, 1003, true);
+    expect([asked.length, said.at(-1)]).toEqual([0, "GMM.Route.Started:Narkoc"]);
+    await click(1005, 1003); // the same town again: nothing
+    await click(1000, 210);
+    expect(asked.at(-1)).toMatchObject({ towns: [1, 3], draw: true, pan: false, land: false, image: false });
+    await click(1095, 905);
+    expect(asked.at(-1)!.towns).toEqual([1, 3, 2]);
+    await tripBack(ctx);
+    expect(asked.at(-1)!.towns).toEqual([1, 3]);
+    await tripLand.set(true, ctx);
+    expect(asked.at(-1)).toMatchObject({ towns: [1, 3], land: true });
+    await tripLand.set(false, ctx);
+    // Shift-click: a new route from Borgzah.
+    const before = asked.length;
+    await click(1100, 900, true);
+    expect([asked.length, said.at(-1)]).toEqual([before, "GMM.Route.Started:Borgzah"]);
+    await click(1500, 500);
+    expect(said.at(-1)).toBe("Route.NoTown");
+    (globalThis as any).canvas.scene = city;
+    await click(1000, 1000);
+    expect(said.at(-1)).toBe("Route.NotWorldMap");
   });
 });

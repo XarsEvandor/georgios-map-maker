@@ -109,7 +109,13 @@
       "Close": "Close"
     },
     "Route": {
-      "Title": "Route on the world map",
+      "Title": "Route by name",
+      "Click": "Route: click towns on the world map",
+      "ClickHint": "Map Maker: click the town to start from, then any towns to pass through, then the last one. Right-click takes back the last town; Shift-click starts a new route.",
+      "LandToggle": "Routes by land only (no boat)",
+      "NotWorldMap": "Map Maker: open the world map to click a route on it.",
+      "NoTown": "Map Maker: no town there. Click on a town's pin.",
+      "Started": "Map Maker: the route starts at {town}. Click the next town.",
       "From": "From",
       "Via": "Through",
       "ViaHint": "towns to pass, in order, split by commas (optional)",

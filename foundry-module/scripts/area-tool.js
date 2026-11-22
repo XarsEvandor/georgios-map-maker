@@ -1,9 +1,9 @@
 /**
  * The "Georgios' Modules" toolbar group, as a canvas layer of its own so it can hold a drag tool:
  * "Map an area" draws a box on a city scene and builds a battle map of what is inside it. The
- * group also holds the Map Maker panel button and "Route" (the way between towns, drawn on the
- * world map); Georgios Scribbler adds its buttons to the same group from its own
- * getSceneControlButtons hook.
+ * group also holds the Map Maker panel button and the routes: "Route" (click towns on the world
+ * map: start, stops, end), "Route by name" and a "By land only" toggle. Georgios Scribbler adds its
+ * buttons to the same group from its own getSceneControlButtons hook.
  */
 
 import { MODULE_ID } from "./lib.js";
@@ -17,7 +17,7 @@ const GOLD = 0xe0a92e;
  * Registers the layer (call during init).
  * @param {{ openPanel: () => void, onArea: (scene: Scene, rect: {x: number, y: number, w: number, h: number}) => Promise<void>, t: (key: string) => string }} opts
  */
-export function registerAreaTool({ openPanel, onArea, t, openCompanions, openRoute }) {
+export function registerAreaTool({ openPanel, onArea, t, openCompanions, routes }) {
   const InteractionLayer = foundry.canvas.layers.InteractionLayer;
 
   class GeorgiosLayer extends InteractionLayer {
@@ -45,7 +45,16 @@ export function registerAreaTool({ openPanel, onArea, t, openCompanions, openRou
         tools: {
           georgiosArea: { name: "georgiosArea", order: 0, title: t("AreaTool"), icon: "fa-solid fa-vector-square", visible: true },
           georgiosMapMaker: { name: "georgiosMapMaker", order: 1, title: t("Open"), icon: "fa-solid fa-dungeon", button: true, visible: true, onChange: () => openPanel() },
-          georgiosRoute: { name: "georgiosRoute", order: 2, title: t("Route.Title"), icon: "fa-solid fa-route", button: true, visible: true, onChange: () => openRoute?.() },
+          // Click towns on the world map: start, stops, end (right-click takes the last one back).
+          georgiosRoute: {
+            name: "georgiosRoute", order: 2, title: t("Route.Click"), icon: "fa-solid fa-route", visible: true,
+            onChange: (event, active) => { if (active) ui.notifications.info(t("Route.ClickHint")); },
+          },
+          georgiosRouteName: { name: "georgiosRouteName", order: 3, title: t("Route.Title"), icon: "fa-solid fa-signs-post", button: true, visible: true, onChange: () => routes?.byName() },
+          georgiosRouteLand: {
+            name: "georgiosRouteLand", order: 4, title: t("Route.LandToggle"), icon: "fa-solid fa-person-hiking", toggle: true, visible: true,
+            active: routes?.land.get() ?? false, onChange: (event, active) => routes?.land.set(active),
+          },
           georgiosCompanions: { name: "georgiosCompanions", order: 9, title: t("Launcher.Title"), icon: "fa-solid fa-power-off", button: true, visible: true, onChange: () => openCompanions?.() },
         },
       };
@@ -110,8 +119,22 @@ export function registerAreaTool({ openPanel, onArea, t, openCompanions, openRou
       this.#clear();
     }
 
+    /** The Route tool: a click adds the town there to the trip (Shift: starts a new one). */
+    _onClickLeft(event) {
+      if (game.activeTool !== "georgiosRoute" || !game.user.isGM) return;
+      const p = event.getLocalPosition(canvas.stage);
+      routes?.click({ x: p.x, y: p.y }, !!event.shiftKey);
+    }
+
+    /** The Route tool: a right-click takes the last town back. */
+    _onClickRight(event) {
+      if (game.activeTool !== "georgiosRoute" || !game.user.isGM) return;
+      routes?.back();
+    }
+
     _deactivate() {
       this.#clear();
+      routes?.off();
     }
 
     /** The box from two corners, cut to the scene and no bigger than the companion builds. */

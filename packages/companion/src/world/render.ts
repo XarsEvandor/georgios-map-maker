@@ -2,8 +2,9 @@
  * The world map, drawn in 2MT's Wonderdraft world-map art on parchment.
  *
  * Base: the cells painted in muted parchment colours by terrain and height, each realm's colour
- * washed over its land, painted small and blown up smooth so it reads as brushwork, then paper
- * grain and a darker rim. On top, in ink: shelf bands off the coast, the coastline, rivers that
+ * (one of twelve, unlike its neighbours': core realmColors) washed over its land and deepened in a
+ * band inside its borders, painted small and blown up smooth so it reads as brushwork, then paper
+ * grain and a darker rim. Realm names are inked in a dark shade of the realm's colour. On top, in ink: shelf bands off the coast, the coastline, rivers that
  * widen to the sea, roads, province and realm borders; 2MT forests, hills and mountains by terrain
  * and height; 2MT settlement pieces by kind and size; ruins and battlefields; ships on the sea
  * lanes; names; a title banner, a compass rose and a frame.
@@ -13,7 +14,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
-import { cellPolygon, edgeLines, isLand, noise2, smoothstep, type AgedBurg, type AgedWorld, type AssetIndex, type AssetRecord, type AzCell, type AzWorld, type Pt } from "@gmm/core";
+import { cellPolygon, edgeLines, isLand, noise2, realmColors, realmNeighbours, smoothstep, type AgedBurg, type AgedWorld, type AssetIndex, type AssetRecord, type AzCell, type AzWorld, type Pt } from "@gmm/core";
 import type { AssetSource } from "../assets/source";
 
 export interface WorldImage {
@@ -31,6 +32,11 @@ const ART_CACHE = resolve("data/cache/world-art");
 const LAND: Record<number, string> = {
   1: "#e6d5a6", 2: "#d6ceb0", 3: "#ddd09b", 4: "#d9d3a1", 5: "#c6c992", 6: "#c2c68f", 7: "#b6bf88", 8: "#b8c08b", 9: "#bcbf98", 10: "#d5cfb4", 11: "#efeee6", 12: "#bfc698",
 };
+
+/** How strongly a realm's colour washes over its land, and the deeper band inside its borders (width in map pixels before the 5x blow-up). */
+const REALM_WASH = 0.38;
+const REALM_BAND = 10;
+const REALM_BAND_OPACITY = 0.6;
 
 const f1 = (n: number) => n.toFixed(1);
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -89,7 +95,9 @@ export async function renderWorld(az: AzWorld, w: AgedWorld, src: AssetSource, i
   const C = az.cells;
   const land = C.map(isLand);
   const state = w.cells.state, biome = w.cells.biome;
-  const stateColor = new Map(w.states.map((s) => [s.id, s.color]));
+  // Each realm in a colour of its own, unlike its neighbours' (an invader keeps the colour it came with).
+  const realmIds = [...new Set(C.filter((c) => land[c.i] && state[c.i]).map((c) => state[c.i]!))];
+  const stateColor = realmColors(realmIds, realmNeighbours(C, state, land), new Map(w.states.filter((s) => s.invader).map((s) => [s.id, s.color])));
   const regionOf = new Array<number>(C.length).fill(0);
   for (const r of w.regions) for (const c of r.cells) regionOf[c] = r.id;
   const packs = new Map(index.packs.map((p) => [p.id, p.name]));
@@ -107,15 +115,29 @@ export async function renderWorld(az: AzWorld, w: AgedWorld, src: AssetSource, i
     return col;
   };
   const small: string[] = [];
+  const realmCells = new Map<number, string[]>();
   for (const c of C) {
     const poly = cellPolygon(az, c);
     if (poly.length < 3) continue;
     const d = poly.map((p, i) => `${i ? "L" : "M"}${f1(p[0])},${f1(p[1])}`).join("") + "Z";
     small.push(`<path d="${d}" fill="${cellFill(c.i)}" stroke="${cellFill(c.i)}" stroke-width="1"/>`);
     const s = land[c.i] ? state[c.i] : 0;
-    if (s) small.push(`<path d="${d}" fill="${stateColor.get(s) ?? "#999"}" opacity="0.2"/>`);
+    if (s) {
+      small.push(`<path d="${d}" fill="${stateColor.get(s) ?? "#999"}" opacity="${REALM_WASH}"/>`);
+      (realmCells.get(s) ?? realmCells.set(s, []).get(s)!).push(d);
+    }
   }
-  const baseSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${az.width}" height="${az.height}"><rect width="100%" height="100%" fill="#9dbcc1"/>${small.join("")}</svg>`;
+  // A deeper band of each realm's colour along the inside of its borders with other realms, the
+  // way a political map edges its countries: kept inside the realm by clipping to its own cells.
+  const smallDefs: string[] = [];
+  for (const [s, cells] of realmCells) {
+    const edges = edgeLines(az, (a, b) => b >= 0 && land[a] && land[b] && state[a] === s && state[b] !== s);
+    if (!edges.length) continue;
+    const d = edges.map((l) => l.map((v, i) => `${i ? "L" : "M"}${f1(az.vertices[v]![0])},${f1(az.vertices[v]![1])}`).join("")).join("");
+    smallDefs.push(`<clipPath id="realm${s}"><path d="${cells.join("")}"/></clipPath>`);
+    small.push(`<g clip-path="url(#realm${s})"><path d="${d}" fill="none" stroke="${stateColor.get(s) ?? "#999"}" stroke-width="${REALM_BAND}" stroke-linejoin="round" stroke-linecap="round" opacity="${REALM_BAND_OPACITY}"/></g>`);
+  }
+  const baseSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${az.width}" height="${az.height}"><defs>${smallDefs.join("")}</defs><rect width="100%" height="100%" fill="#9dbcc1"/>${small.join("")}</svg>`;
   const baseSmall = await sharp(Buffer.from(baseSvg)).blur(1.8).png().toBuffer();
   const base = await sharp(baseSmall).resize(W, H, { kernel: "cubic", fit: "fill" }).removeAlpha().raw().toBuffer();
   // Paper grain and a darker rim.
@@ -296,6 +318,22 @@ export async function renderWorld(az: AzWorld, w: AgedWorld, src: AssetSource, i
     boxes.push([x, y, x + w2, y + h2]);
     return true;
   };
+  // The cell under a point (map units): the nearest cell centre, looked up in 40-unit buckets.
+  const BK = 40;
+  const buckets = new Map<string, AzCell[]>();
+  for (const c of C) {
+    const k = `${Math.floor(c.p[0] / BK)},${Math.floor(c.p[1] / BK)}`;
+    (buckets.get(k) ?? buckets.set(k, []).get(k)!).push(c);
+  }
+  const cellAt = (x: number, y: number): AzCell | undefined => {
+    let best: AzCell | undefined, bd = Infinity;
+    const bx = Math.floor(x / BK), by = Math.floor(y / BK);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const c of buckets.get(`${bx + i},${by + j}`) ?? []) {
+      const d = (c.p[0] - x) ** 2 + (c.p[1] - y) ** 2;
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  };
   // Where the towns and their names stand, for realm names to keep clear of.
   const townBoxes = alive.filter((b) => b.capital || b.population >= 3).map((b) => {
     const px = townPx(b), fs = b.capital ? 46 : b.population >= 12 ? 36 : 27;
@@ -316,7 +354,8 @@ export async function renderWorld(az: AzWorld, w: AgedWorld, src: AssetSource, i
     const span = (Math.max(...xs) - Math.min(...xs)) * S;
     const words = label.split(" ");
     const splits: string[][] = [[label]];
-    if (label.length > 22 && words.length > 1) {
+    // Any name of several words may break into lines when the realm has no room for it on one.
+    if (words.length > 1) {
       let two: string[] = [], three: string[] = [];
       const longest = (ls: string[]) => Math.max(...ls.map((l) => l.length));
       for (let i = 1; i < words.length; i++) {
@@ -327,26 +366,41 @@ export async function renderWorld(az: AzWorld, w: AgedWorld, src: AssetSource, i
           if (!three.length || longest(u) < longest(three)) three = u;
         }
       }
-      if (label.length * fs * 0.86 > span * 1.2) splits.shift();
+      if (label.length > 22 && label.length * fs * 0.86 > span * 1.2) splits.shift();
       splits.push(two);
-      if (three.length) splits.push(three);
+      if (three.length && label.length > 22) splits.push(three);
     }
     // The spot nearest the middle where the name covers no town or its name.
     const reach = 0.35 * Math.max(span, (Math.max(...ys) - Math.min(...ys)) * S);
-    const boxOf = (c: AzCell, ls: string[]) => {
-      const tw = Math.max(...ls.map((l) => l.length)) * fs * 0.86, y0 = c.p[1] * S - (ls.length - 1) * fs * 0.6;
-      return [c.p[0] * S - tw / 2, y0 - fs, c.p[0] * S + tw / 2, y0 - fs + fs * 1.2 * ls.length] as const;
+    const boxOf = (c: AzCell, ls: string[], f = fs) => {
+      const tw = Math.max(...ls.map((l) => l.length)) * f * 0.86, y0 = c.p[1] * S - (ls.length - 1) * f * 0.6;
+      return [c.p[0] * S - tw / 2, y0 - f, c.p[0] * S + tw / 2, y0 - f + f * 1.2 * ls.length] as const;
     };
     const clear = (b: readonly [number, number, number, number]) => !townBoxes.some(([a, c, d, e]) => b[0] < d && b[2] > a && b[1] < e && b[3] > c);
-    let at = near[0]!, lines = splits[0]!;
-    search: for (const ls of splits) for (const c of near) {
-      if (Math.hypot(c.p[0] - cx, c.p[1] - cy) * S > reach) break;
-      if (clear(boxOf(c, ls))) { at = c; lines = ls; break search; }
+    // How much of the name lies on the realm's own land (of nine points over its box).
+    const own9 = (b: readonly [number, number, number, number]) => {
+      let n = 0;
+      for (const fx of [0.04, 0.5, 0.96]) for (const fy of [0.15, 0.5, 0.85]) {
+        const c = cellAt((b[0] + (b[2] - b[0]) * fx) / S, (b[1] + (b[3] - b[1]) * fy) / S);
+        if (c && land[c.i] && state[c.i] === s.id) n++;
+      }
+      return n;
+    };
+    // First a spot where the whole name lies on the realm's land (on one line or broken, at full
+    // size, then a fifth smaller), looking a little farther out than the middle; then one where
+    // most of it does; then any spot near the middle.
+    let at = near[0]!, lines = splits[0]!, size = fs;
+    search: for (const [need, far, scale] of [[9, 1.8, 1], [9, 1.8, 0.8], [7, 1.8, 1], [7, 1.8, 0.8], [0, 1, 1]] as const) for (const ls of splits) for (const c of near) {
+      if (Math.hypot(c.p[0] - cx, c.p[1] - cy) * S > reach * far) break;
+      const box = boxOf(c, ls, fs * scale);
+      if (clear(box) && (!need || own9(box) >= need)) { at = c; lines = ls; size = fs * scale; break search; }
     }
-    const [bx0, by0, bx1, by1] = boxOf(at, lines);
-    const y0 = at.p[1] * S - (lines.length - 1) * fs * 0.6;
+    const [bx0, by0, bx1, by1] = boxOf(at, lines, size);
+    const y0 = at.p[1] * S - (lines.length - 1) * size * 0.6;
     free(bx0, by0, bx1 - bx0, by1 - by0);
-    lines.forEach((l, k) => parts.push(`<text x="${f1(at.p[0] * S)}" y="${f1(y0 + k * fs * 1.2)}" font-family="Georgia, serif" font-size="${f1(fs)}" letter-spacing="${f1(fs * 0.22)}" text-anchor="middle" fill="#4a3423" opacity="0.72" ${halo} stroke-width="${f1(fs / 7)}">${esc(l)}</text>`));
+    // The realm's name in a dark shade of its own colour.
+    const ink = mix(stateColor.get(s.id) ?? "#6b4a35", "#2a1d12", 0.45);
+    lines.forEach((l, k) => parts.push(`<text x="${f1(at.p[0] * S)}" y="${f1(y0 + k * size * 1.2)}" font-family="Georgia, serif" font-size="${f1(size)}" letter-spacing="${f1(size * 0.22)}" text-anchor="middle" fill="${ink}" opacity="0.8" ${halo} stroke-width="${f1(size / 7)}">${esc(l)}</text>`));
   }
   for (const b of [...alive].sort((x, y) => Number(y.capital) - Number(x.capital) || y.population - x.population)) {
     if (!b.capital && b.population < 3) continue;

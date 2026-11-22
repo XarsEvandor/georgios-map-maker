@@ -23,6 +23,15 @@ const KINDS = {
   mage: { stat: "Mage", art: "humanoid/Mage" },
   apprentice: { stat: "Commoner", art: "humanoid/ApprenticeWizard" },
   minstrel: { stat: "Commoner", art: "heroes/BardLute" },
+  // The cast of a set piece (plan.cast): whoever the DM named.
+  kobold: { stat: "Kobold", art: "humanoid/Kobold" },
+  berserker: { stat: "Berserker", art: "humanoid/Berserker" },
+  spy: { stat: "Spy", art: "humanoid/Spy" },
+  scout: { stat: "Scout", art: "humanoid/Scout" },
+  bandit: { stat: "Bandit", art: "humanoid/Bandit" },
+  cultist: { stat: "Cultist", art: "humanoid/Cultist" },
+  assassin: { stat: "Assassin", art: "humanoid/Assassin" },
+  gladiator: { stat: "Gladiator", art: "humanoid/Gladiator" },
 };
 /** Soft cloth tints, so a room full of the same figure reads as different people. */
 const TINTS = ["#ffffff", "#ffffff", "#f3e6d6", "#e2ece4", "#ece0ee", "#e4e7f6", "#f6eed6", "#eadcd6"];
@@ -179,6 +188,43 @@ export async function populate(c, scene) {
     throw e;
   }
   await scene.update({ [`flags.${MODULE_ID}.people`]: docs.length + reused.length + plan.keep.length, [`flags.${MODULE_ID}.peopleLook`]: PEOPLE_LOOK });
+  return docs.length;
+}
+
+/**
+ * The cast of a set piece (the frozen intruders under a sundial): tokens the DM named, hostile,
+ * on the shared stat blocks, where the generator stood them. They carry a `cast` flag and no
+ * `person` flag, so neither the townsfolk placement nor another module's recasting touches them;
+ * a rebuild of the map replaces them. Returns how many it placed.
+ */
+export async function placeCast(scene, cast, mapId) {
+  const old = scene.tokens.filter((tk) => tk.getFlag(MODULE_ID, "cast")).map((tk) => tk.id);
+  if (old.length) await scene.deleteEmbeddedDocuments("Token", old);
+  const docs = [];
+  for (const [i, m] of (cast ?? []).entries()) {
+    const k = KINDS[m.kind] ?? KINDS.commoner;
+    const actor = await actorFor(k.stat);
+    const h = hash(`${mapId}:cast:${i}:${m.name}`);
+    const size = 0.9 + ((h >>> 3) % 11) / 100;
+    docs.push({
+      name: m.name,
+      actorId: actor?.id ?? null,
+      actorLink: false,
+      x: m.x,
+      y: m.y,
+      width: 1,
+      height: 1,
+      rotation: m.rotation ?? 0,
+      texture: { src: `${TOKENS}/${k.art}.webp`, scaleX: (h & 1 ? -1 : 1) * size, scaleY: size, tint: TINTS[(h >>> 8) % TINTS.length] },
+      disposition: CONST.TOKEN_DISPOSITIONS.HOSTILE,
+      displayName: CONST.TOKEN_DISPLAY_MODES.HOVER,
+      displayBars: CONST.TOKEN_DISPLAY_MODES.OWNER,
+      sight: { enabled: false },
+      ring: RING,
+      flags: { [MODULE_ID]: { cast: true, kind: m.kind } },
+    });
+  }
+  if (docs.length) await scene.createEmbeddedDocuments("Token", docs);
   return docs.length;
 }
 

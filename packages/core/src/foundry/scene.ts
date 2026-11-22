@@ -6,6 +6,7 @@
 import { PX_PER_SQUARE } from "../assets/model";
 import { parseVector2, parseVector2Array, type Vec2 } from "../ddmap/godot";
 import type { Shelter } from "../gen/layout";
+import { handRotation, type SundialOut } from "../gen/sundial";
 
 /** Foundry wall sense values (CONST.WALL_SENSE_TYPES): none 0, limited 10, normal 20. */
 const SENSE = { NONE: 0, LIMITED: 10, NORMAL: 20 } as const;
@@ -49,8 +50,42 @@ export interface FoundryWall {
 export interface FoundryLight {
   x: number;
   y: number;
+  /** Off until something turns it on (a sundial's gem). */
+  hidden?: boolean;
   config: { dim: number; bright: number; color: string; alpha: number; attenuation?: number; luminosity?: number; animation?: { type: string; speed: number; intensity: number }; darkness: { min: number; max: number } };
   flags: Record<string, unknown>;
+}
+
+/** A tile the module uploads an image for (`texture.src` starts as "hand:<hand>" for a sundial's shadow). */
+export interface FoundryTile {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  alpha: number;
+  sort: number;
+  texture: { src: string };
+  flags: Record<string, unknown>;
+}
+
+/** A map pin for the GM alone (no journal entry): on a sundial, the way down, which builds `place` when double-clicked. */
+export interface FoundryPin {
+  x: number;
+  y: number;
+  text: string;
+  icon: string;
+  place?: string;
+  flags: Record<string, unknown>;
+}
+
+/** Someone standing on the map as a token (scene pixels, top-left corner), with stats by `kind`. */
+export interface FoundryCastToken {
+  name: string;
+  kind: string;
+  x: number;
+  y: number;
+  rotation: number;
 }
 
 export interface FoundrySceneData {
@@ -66,6 +101,11 @@ export interface FoundrySceneData {
   /** Where the weather stays out, as Foundry polygon points (x, y, x, y...); holes cut open sky out. The module makes one Suppress Weather region of them. */
   sheltered: Array<{ points: number[]; hole?: boolean }>;
   notes: string;
+  /** Set pieces: a sundial's hands (tiles), its way down (a pin) and the frozen cast (tokens), with what the GM's crank needs in `flags.sundial`. */
+  tiles?: FoundryTile[];
+  pins?: FoundryPin[];
+  tokens?: FoundryCastToken[];
+  flags?: Record<string, unknown>;
 }
 
 export interface SceneOptions {
@@ -81,6 +121,46 @@ export interface SceneOptions {
   decorative?: Set<string>;
   /** Roofed ground in squares (GeneratedVersion.sheltered). */
   sheltered?: Shelter[];
+  /** The sundial set piece of the map (GeneratedVersion.sundial). */
+  sundial?: SundialOut;
+}
+
+/**
+ * A sundial's Foundry side: each hand's shadow as a tile twice its length, pivoting on the tower
+ * (its image has the shadow on the upper half, so turning the tile turns the hand round the
+ * tower); a hidden coloured light under each gem; a GM-only pin on the way down; the frozen cast as
+ * tokens; and in the scene flags what the crank needs: the hands' numerals, which gem answers to
+ * which hand, and the key the plaza and the vestibule share.
+ */
+function sundialScene(sd: SundialOut, pps: number, dist: number): Pick<FoundrySceneData, "tiles" | "pins" | "tokens" | "flags"> & { lights: FoundryLight[] } {
+  const P = (p: [number, number]): [number, number] => [Math.round(p[0] * pps), Math.round(p[1] * pps)];
+  const [cx, cy] = P(sd.at);
+  const flag = (extra: Record<string, unknown>) => ({ "georgios-map-maker": { sundial: { key: sd.key, ...extra } } });
+  const tiles: FoundryTile[] = sd.hands.map((h, i) => {
+    const L = Math.max(pps, Math.round(h.length * pps));
+    const W = Math.max(16, Math.round(h.width * pps * 2.4));
+    return { x: cx - Math.round(W / 2), y: cy - L, width: W, height: 2 * L, rotation: handRotation(h.numeral, sd.mirrored), alpha: 1, sort: 10 + i, texture: { src: `hand:${h.hand}` }, flags: flag({ hand: h.hand, numeral: h.numeral, mirrored: sd.mirrored, pivot: [cx, cy] }) };
+  });
+  const lights: FoundryLight[] = sd.gems.map((g) => {
+    const [x, y] = P(g.at);
+    return {
+      x, y, hidden: true,
+      config: { dim: dist * 3, bright: dist, color: g.rgb, alpha: 0.7, attenuation: 0.5, luminosity: 0.6, animation: { type: "pulse", speed: 2, intensity: 4 }, darkness: { min: 0, max: 1 } },
+      flags: flag({ gem: g.numeral, color: g.color, hand: g.hand }),
+    };
+  });
+  const pins: FoundryPin[] = [];
+  if (sd.door) {
+    const [x, y] = P(sd.door);
+    pins.push({ x, y, text: "The way down (the hour shadow's tip)", icon: "icons/svg/cave.svg", ...(sd.belowPlace ? { place: sd.belowPlace } : {}), flags: flag({ door: true }) });
+  }
+  const tokens: FoundryCastToken[] = (sd.cast ?? []).map((m) => ({
+    name: m.name, kind: m.kind, x: Math.round((m.x - 0.5) * pps), y: Math.round((m.y - 0.5) * pps),
+    // Token art faces down the image: rotation 0 is facing south, turning clockwise.
+    rotation: Math.round(((Math.atan2(-m.facing[0], m.facing[1]) * 180) / Math.PI + 360) % 360),
+  }));
+  const flags = { sundial: { key: sd.key, mirrored: sd.mirrored, stopped: sd.stopped, pivot: [cx, cy], radius: Math.round(sd.radius * pps), gems: sd.gems.map((g) => ({ numeral: g.numeral, color: g.color, hand: g.hand })) } };
+  return { tiles, lights, pins, tokens, flags };
 }
 
 function argbToHex(argb: string): string {
@@ -182,6 +262,7 @@ export function toFoundryScene(map: Record<string, any>, opts: SceneOptions): Fo
   });
   const ambient = level.environment?.ambient_light ?? "ffffffff";
   const lum = (parseInt(ambient.slice(2, 4), 16) * 0.299 + parseInt(ambient.slice(4, 6), 16) * 0.587 + parseInt(ambient.slice(6, 8), 16) * 0.114) / 255;
+  const dial = opts.sundial ? sundialScene(opts.sundial, opts.pps, dist) : undefined;
   return {
     name: opts.name,
     width: Math.round(world.width * opts.pps),
@@ -190,9 +271,10 @@ export function toFoundryScene(map: Record<string, any>, opts: SceneOptions): Fo
     grid: { type: 1, size: opts.pps, distance: dist, units: opts.gridUnits ?? "ft" },
     darkness: Math.round(Math.max(0, Math.min(1, 1 - lum)) * 100) / 100,
     walls,
-    lights,
+    lights: dial ? [...lights, ...dial.lights] : lights,
     sheltered: (opts.sheltered ?? []).map((sh) => ({ points: polygonPoints(sh.points, opts.pps), ...(sh.hole ? { hole: true } : {}) })).filter((sh) => sh.points.length >= 6),
     notes: opts.credit ?? "Map assets: 2-Minute Tabletop (CC BY-NC 4.0). Built with Georgios' Map Maker.",
+    ...(dial ? { tiles: dial.tiles, pins: dial.pins, tokens: dial.tokens, flags: dial.flags } : {}),
   };
 }
 

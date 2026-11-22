@@ -17,6 +17,7 @@ export * from "./gen/generate";
 export * from "./gen/adopt";
 export * from "./ddmap/roundtrip";
 export * from "./foundry/scene";
+export * from "./gen/sundial";
 export * from "./city/city";
 export * from "./city/street";
 export * from "./city/plans";

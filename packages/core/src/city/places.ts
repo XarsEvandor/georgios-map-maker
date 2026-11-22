@@ -147,6 +147,9 @@ export function cityPlaces(city: City): Places {
   const inWall = (p: Pt) => (wall ? inside(p, wall.ring) : true);
   const spots = findHotSpots(city);
   const plots = new Map<number, PlotLandmark>();
+  // A sundial tower the DM asked for (city.set) takes its plot before the rules choose anything.
+  const setTower = city.set?.sundial?.tower;
+  if (setTower !== undefined && B[setTower]) plots.set(setTower, "wizard");
   const free = (i: number) => !plots.has(i);
   const plotOf = (ring?: Ring) => (ring ? B.indexOf(ring) : -1);
   const centre: Pt = wall ? centroid(wall.ring) : [city.bounds.x + city.bounds.w / 2, city.bounds.y + city.bounds.h / 2];
@@ -205,7 +208,7 @@ export function cityPlaces(city: City): Places {
   }
 
   // The wizard's tower: the squarest mid-sized plot a short walk from the market.
-  if (size === "large") {
+  if (size === "large" && setTower === undefined) {
     const best = B.map((_, i) => i)
       .filter((i) => free(i) && !inCastle(i) && inWall(C[i]!) && A[i]! >= 70 && A[i]! <= 280 && dist(C[i]!, marketAt) >= 80 && dist(C[i]!, marketAt) <= 350)
       .map((i) => ({ i, score: aspectOf(B[i]!) + Math.abs(dist(C[i]!, marketAt) - 180) / 600 }))
@@ -404,7 +407,13 @@ export function allHotSpots(city: City, places = cityPlaces(city)): HotSpot[] {
     return id;
   };
   for (const [i, kind] of places.plots) {
-    if (kind === "wizard") out.push({ id: idFor("wizard"), kind: "wizard", label: "Wizard's tower", at: centroid(B[i]!), building: B[i]!, onDemand: true });
+    const sd = city.set?.sundial;
+    if (kind === "wizard" && sd && sd.tower === i) {
+      // A sundial tower: a street map of its plaza (the dial round it), and the vestibule under the dial, for the GM only.
+      const c = centroid(B[i]!);
+      out.push({ id: idFor("wizard"), kind: "wizard", label: "Wizard's tower", at: c, area: boxAround(c, Math.max(60, Math.ceil(sd.radius * 2 + 30))), building: B[i]!, onDemand: true });
+      out.push({ id: idFor("wizard-below"), kind: "wizard", label: "Wizard's tower: under the dial", at: [c[0], c[1] + 14], building: B[i]!, onDemand: true, secret: true, icon: "icons/svg/cave.svg", ...(sd.notes ? { notes: sd.notes } : {}) });
+    } else if (kind === "wizard") out.push({ id: idFor("wizard"), kind: "wizard", label: "Wizard's tower", at: centroid(B[i]!), building: B[i]!, onDemand: true });
     if (kind === "inn") {
       const dir = places.innGates.get(i) ?? "";
       out.push({ id: idFor(`inn-${dir || i}`), kind: "inn", label: dir ? `Inn by the ${dir} gate` : "Inn", at: centroid(B[i]!), building: B[i]!, onDemand: true });

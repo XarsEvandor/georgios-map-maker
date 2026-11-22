@@ -16,6 +16,7 @@ import { buildStyles, type Style, type Wear } from "./style";
 import type { City } from "../city/city";
 import { generateStreet } from "../city/street";
 import { generateWar } from "./war";
+import { dressSundial, type SundialOut } from "./sundial";
 
 export interface ElementInfo {
   kind: "object" | "wall" | "door" | "window" | "floor" | "light" | "path";
@@ -66,6 +67,8 @@ export interface GeneratedVersion {
   placed: Placed[];
   /** Where the weather stays out (roofed buildings, or all but an enclosed map's approach), in squares. */
   sheltered?: Shelter[];
+  /** The sundial set piece (gen/sundial.ts): numerals for the renderer; hands, gems, the door and the cast for Foundry. */
+  sundial?: SundialOut;
   notes: string[];
   summary: VersionSummary;
 }
@@ -212,6 +215,8 @@ function buildVersion(plan: ScenePlan, layout: Layout, cat: Catalog, st: Style, 
   const input = { plan, layout, cat, style: st, styles, locked };
   const inside = dress(input);
   const outside = dressExterior(input);
+  // The room under a sundial: the device, the face and the frozen cast, after the furniture.
+  const dial = dressSundial(input, inside);
 
   // Terrain: patchy grass, worn to dirt along roads, around the building and its doors.
   if (st.terrain.length) {
@@ -364,7 +369,7 @@ function buildVersion(plan: ScenePlan, layout: Layout, cat: Catalog, st: Style, 
     const c = p.center ?? [p.x, p.y];
     return c[0] >= ap.x - 0.3 && c[0] <= ap.x + ap.w + 0.3 && c[1] >= ap.y - 0.3 && c[1] <= ap.y + ap.h + 0.3;
   };
-  const placed = [...inside.placed, ...outside.placed.filter(onApproach)].filter((p) => {
+  const placed = [...inside.placed, ...(dial?.placed ?? []), ...outside.placed.filter(onApproach)].filter((p) => {
     if (p.locked) {
       if (seenLocked.has(p.key)) return false;
       seenLocked.add(p.key);
@@ -412,11 +417,13 @@ function buildVersion(plan: ScenePlan, layout: Layout, cat: Catalog, st: Style, 
     elements,
     placed,
     sheltered: shelterOf(layout),
+    ...(dial ? { sundial: dial.sundial } : {}),
     notes: [
       ...(layout.dropped?.length ? [`zones left out because the map is too small for them: ${layout.dropped.join(", ")}; make the map bigger or use fewer rooms`] : []),
       ...b.warnings,
       ...inside.notes,
       ...outside.notes,
+      ...(dial?.notes ?? []),
       ...notes,
     ],
     summary: {

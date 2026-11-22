@@ -25,6 +25,7 @@ import { TRADES, type Trade } from "./shops";
 import { SMALL_GOODS, STOREFRONTS } from "./storefront";
 import { furnishBuilding, type BuildingKind } from "./interiors";
 import { RECIPE_BY_TYPE, rolesOfRecipe } from "../gen/recipes";
+import { dialGeometry, type SundialOut } from "../gen/sundial";
 
 type Vec = [number, number];
 
@@ -419,8 +420,19 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     }
   };
   // 2MT houses: drawings laid into the plots, yards behind them; plots nothing fits keep a procedural roof.
-  const art = opts.houses !== "roofs" ? placeHouses(city, houseArtFrom(cat.index), city.url) : undefined;
+  const houseArt = houseArtFrom(cat.index);
+  const art = opts.houses !== "roofs" ? placeHouses(city, houseArt, city.url) : undefined;
   const bare = new Set(art?.bare ?? nearIdx);
+
+  // The sundial tower (plan.sundial, DESIGN 38): sealed, three spires, the dial etched round it on its plaza.
+  const dialPlan = plan.sundial?.tower !== undefined ? plan.sundial : undefined;
+  const towerPlot = dialPlan ? city.buildings[dialPlan.tower!] : undefined;
+  const towerHouse = dialPlan && art ? art.houses.find((hs) => hs.plot === dialPlan.tower && hs.landmark === "wizard") : undefined;
+  const towerAt: Vec | undefined = dialPlan && towerPlot ? sq(towerHouse?.at ?? centroid(towerPlot)) : undefined;
+  const dialR = dialPlan && towerPlot ? (dialPlan.radius ?? Math.max(bboxOf(towerPlot).w, bboxOf(towerPlot).h) / 2 + 3.5) / M_PER_SQUARE : 0;
+  const ringPoly = (r: number, n: number): Vec[] => Array.from({ length: n }, (_, i) => [towerAt![0] + Math.cos((i / n) * Math.PI * 2) * r, towerAt![1] + Math.sin((i / n) * Math.PI * 2) * r] as Vec);
+  // The plaza: flagstones under the tower out past the ring, over the yard the terrain painted.
+  if (towerAt && flag) elements[b.addPattern({ points: ringPoly(dialR + 1.3, 48).map(px), texture: flag.res, layer: 100 })] = { kind: "floor", key: "sundial/plaza", zone: zoneId, asset: flag.id };
 
   // Buildings from inside (the default): a floor, windows, rooms and furniture where the roof was.
   const indoor = opts.interiors !== false ? indoorStyle(cat, plan, st, houseWall) : undefined;
@@ -503,6 +515,31 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     for (const [n, hs] of art.houses.entries()) {
       const ring = hs.ring.map(sq);
       if (!ring.some(inMap)) continue;
+      if (towerHouse && hs === towerHouse) {
+        // The sundial tower is sealed: the roof stays on, three spires crown it (a stub, a tall one
+        // and a needle, the hands of the dial), no door, and nothing to show inside.
+        place(ctx, { asset: use(hs.art.asset)!, role: "wizard", at: sq(hs.at), rot: hs.rot, scale: hs.scale, layer: LAYER.overhead, zone: zoneId, feature: "landmarks", occupy: "force", light: false });
+        const spire = houseArt.find((a) => a.role === "spire");
+        const towerSize = (Math.max(hs.art.w, hs.art.h) * hs.scale) / M_PER_SQUARE;
+        if (spire) {
+          const spireSize = Math.max(spire.w, spire.h) / M_PER_SQUARE;
+          const c = Math.cos(hs.rot), s = Math.sin(hs.rot);
+          for (const [du, dv, frac] of [[-0.21, -0.16, 0.44], [0.2, 0.12, 0.3]] as Array<[number, number, number]>) {
+            const at: Vec = [sq(hs.at)[0] + (du * c - dv * s) * towerSize, sq(hs.at)[1] + (du * s + dv * c) * towerSize];
+            place(ctx, { asset: use(spire.asset)!, role: "spire", at, rot: hs.rot, scale: (towerSize * frac) / spireSize, layer: LAYER.overhead, zone: zoneId, feature: "landmarks", occupy: "force", light: false });
+          }
+        }
+        const shape = (hs.walls ?? hs.ring).map(sq);
+        const res = b.addWall({ points: shape.map(px), loop: true, texture: houseWall?.res, doors: [] });
+        elements[res.id] = { kind: "wall", key: `house#a${n}` };
+        houseWalls.push(shape);
+        sheltered.push({ points: shape.map(([x, y]) => [x, y] as [number, number]) });
+        const tb = bboxOf(shape);
+        for (let yy = Math.floor(tb.y); yy < tb.y + tb.h; yy += 0.25) for (let xx = Math.floor(tb.x); xx < tb.x + tb.w; xx += 0.25) {
+          if (inside([xx + 0.125, yy + 0.125], shape as Ring)) grid.mark({ x: xx, y: yy, w: 0.25, h: 0.25 }, Cell.Wall);
+        }
+        continue;
+      }
       // A spire sits on its chapel's roof: no walls of its own, and nothing to show from inside.
       if (indoor && hs.landmark === "spire") continue;
       if (!indoor) place(ctx, { asset: use(hs.art.asset)!, role: hs.landmark ?? "house", at: sq(hs.at), rot: hs.rot, scale: hs.scale, layer: LAYER.overhead, zone: zoneId, feature: hs.landmark ? "landmarks" : "houses", occupy: "force", light: false });
@@ -571,6 +608,37 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
         if (inside([xx + 0.125, yy + 0.125], shape as Ring)) grid.mark({ x: xx, y: yy, w: 0.25, h: 0.25 }, Cell.Wall);
       }
     }
+  }
+  // The dial round the sundial tower: a cobbled ring with the twelve numerals cut into it (the
+  // renderer etches them), the gems set inside the ring, and the way down where the hour shadow ends.
+  let sundial: SundialOut | undefined;
+  if (dialPlan && towerAt) {
+    const geo = dialGeometry(dialPlan, towerAt, dialR, false);
+    // The ring: a band of darker stone let into the plaza (an annulus: the outer circle one way,
+    // the inner the other, joined by a slit), or a cobbled ribbon when the library has no such stone.
+    const dark = use(cat.index.assets.find((a) => a.kind === "pattern" && /^Texture - Cobble, Square - 4x4 - (Cursed|Withered)$/.test(a.name) && /Grass & Road Assets 2/.test(cat.packs.get(a.pack)?.name ?? "")));
+    if (dark) {
+      const outer = ringPoly(dialR + 1.1, 48), inner = ringPoly(Math.max(0.5, dialR - 1.1), 48).reverse();
+      elements[b.addPattern({ points: [...outer, outer[0]!, inner[0]!, ...inner.slice(1), inner[0]!].map(px), texture: dark.res, layer: 100 })] = { kind: "floor", key: "sundial/ring", zone: zoneId, asset: dark.id };
+    } else {
+      const band = use(cat.index.assets.find((a) => a.kind === "path" && a.name === "Ribbon - Cobble Path 1 - 10x3_path" && /Grass & Road Assets 2/.test(cat.packs.get(a.pack)?.name ?? "")) ?? st.road);
+      if (band) {
+        const pts = ringPoly(dialR, 36);
+        elements[b.addPath({ points: [...pts, pts[0]!].map(px), texture: band.res, width: S * 2.2, layer: 100, smooth: false })] = { kind: "path", key: "sundial/ring", zone: zoneId };
+      }
+    }
+    const gemArt = cat.index.assets.find((a) => a.kind === "object" && a.name === "Clutter - Gem 1 - Colorable" && /Royal Bank/.test(cat.packs.get(a.pack)?.name ?? "")) ?? cat.index.assets.find((a) => a.kind === "object" && /^Decor - Clutter - Gem 1$/.test(a.name));
+    for (const g of geo.gems) {
+      if (!gemArt) { notes.push(`sundial: no gem art for the ${g.color}`); break; }
+      place(ctx, { asset: use(gemArt)!, role: "gem", at: g.at, rot: (g.numeral * Math.PI) / 6, scale: 1.6, layer: LAYER.furniture, zone: zoneId, feature: "sundial", key: `sundial/gem:${g.color}`, occupy: "force", light: false, ...(gemArt.colorable ? { color: `ff${g.rgb.slice(1)}` } : {}) });
+      grid.mark(rectAt(g.at, [1, 1]), Cell.Solid);
+    }
+    // The way down is a plain, worn stone the GM knows about; the numerals stay clear of clutter.
+    const worn = pick(ctx, zoneId, "crack", { maxSide: 1.4 }) ?? pick(ctx, zoneId, "dirt", { maxSide: 1.4 });
+    if (geo.door && worn) place(ctx, { asset: use(worn)!, role: "decal", at: geo.door, rot: 0, layer: LAYER.decal, zone: zoneId, feature: "sundial", key: "sundial/door", occupy: "force", light: false });
+    for (const e of geo.etchings) grid.mark(rectAt(e.at, [1.6, 1.6]), Cell.Solid);
+    sundial = { ...geo, key: dialPlan.key, belowPlace: dialPlan.belowPlace };
+    notes.push(`sundial: ring ${dialR.toFixed(1)} squares round the tower at ${towerAt.map((v) => v.toFixed(1)).join(",")}; gems ${geo.gems.map((g) => `${g.color} on ${g.numeral}`).join(", ")}; the way down at ${geo.door?.map((v) => v.toFixed(1)).join(",")}`);
   }
   if (art) {
     // Yards: a kitchen garden, a woodpile, hay and animals out in the country, crates and barrels
@@ -1209,6 +1277,7 @@ function streetVersion(plan: ScenePlan, layout: Layout, cat: Catalog, city: City
     elements,
     placed,
     sheltered,
+    ...(sundial ? { sundial } : {}),
     notes: [...b.warnings, ...ctx.notes, ...notes],
     summary: {
       objects: placed.length,

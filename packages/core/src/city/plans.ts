@@ -40,10 +40,39 @@ export function areaPlan(city: City, area: Box, opts: CityPlanOptions & { id: st
 /** The plan for a hot spot: its street area, or an interior sized to its building. */
 export function hotspotPlan(city: City, hs: HotSpot, opts: CityPlanOptions): ScenePlan {
   const title = `${city.name}: ${hs.label}`;
-  if (hs.area) return areaPlan(city, hs.area, { ...opts, id: hs.id, title });
+  const sd = city.set?.sundial;
+  if (hs.area) {
+    const plan = areaPlan(city, hs.area, { ...opts, id: hs.id, title });
+    // The sundial tower's plaza: the dial etched round the tower (gen/sundial.ts), the way down on the hour shadow's tip.
+    if (hs.kind === "wizard" && sd && hs.id === "wizard") return { ...plan, sundial: { tower: sd.tower, radius: sd.radius, gems: sd.gems, stopped: sd.stopped, key: `${opts.prefix}-wizard`, belowPlace: "wizard-below" } };
+    return plan;
+  }
   const bb = bboxOf(hs.building ?? [hs.at, hs.at]);
   // The building's footprint in squares, with room for its yard.
   const fw = Math.max(10, Math.round(bb.w / M_PER_SQUARE)), fh = Math.max(10, Math.round(bb.h / M_PER_SQUARE));
+  if (hs.kind === "wizard" && sd && hs.id === "wizard-below") {
+    // The vestibule under the dial: bigger than the tower above it, enclosed in the dark, the stair its only way in
+    // and a locked gate into the rest of the folded tower. The dial shows through its ceiling, mirrored.
+    const side = Math.max(26, Math.min(44, Math.round(Math.max(fw, fh) * 1.6) + 10));
+    return {
+      id: `${opts.prefix}-${hs.id}`.slice(0, 64),
+      title,
+      seed: seedOf(`${opts.key}:${hs.id}`),
+      genre: "gothic",
+      size: { w: side, h: side + 4 },
+      mood: { time: opts.time ?? "day", wear: "grimy", lighting: "dim" },
+      versions: { count: 1, picked: "v1" },
+      enclosed: true,
+      approach: { depth: 3 },
+      levels: [{
+        id: "ground",
+        zones: [{ id: "vestibule", type: "gothic.vestibule", area: "large" }],
+        connections: [{ id: "stair", from: "vestibule", to: "outside", via: "door" }, { id: "inner_gate", from: "vestibule", to: "beyond", via: "gate", width: 3, state: "locked" }],
+      }],
+      sundial: { zone: "vestibule", gems: sd.gems, stopped: sd.stopped, key: `${opts.prefix}-wizard` },
+      ...(sd.cast?.length ? { cast: sd.cast } : {}),
+    };
+  }
   const size = { w: Math.min(60, fw + 8), h: Math.min(60, fh + 8) };
   let genre: ScenePlan["genre"] = "medieval";
   let zones: Zone[] = [];

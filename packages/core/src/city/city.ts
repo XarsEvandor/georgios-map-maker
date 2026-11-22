@@ -7,16 +7,44 @@
  * Screen coordinates: x east, y south (GeoJSON y is flipped).
  */
 
+import type { CastMember, SundialGemPlan, Hand } from "../gen/plan";
 import type { Trade } from "./shops";
 
 export type Pt = [number, number];
 export type Ring = Pt[];
 export interface Box { x: number; y: number; w: number; h: number }
 
+/**
+ * A sundial tower the DM asked for in a city (the city's meta.json, `set.sundial`): the wizard's
+ * tower stands on the plot at `at`, the houses within `clear` metres of it make way for its plaza,
+ * and the dial, the gems and the hands come from gen/sundial.ts.
+ */
+export interface CitySundial {
+  /** A point on (or nearest) the tower's plot, metres. */
+  at: Pt;
+  /** Ring radius, metres (default: half the plot plus a walk round the tower). */
+  radius?: number;
+  /** Houses within this many metres of the tower's centre make way (default: the ring and a bit). */
+  clear?: number;
+  gems: SundialGemPlan[];
+  stopped: Record<Hand, number>;
+  /** Who stands frozen in the vestibule under the dial. */
+  cast?: CastMember[];
+  /** The GM's notes for the vestibule's journal page. */
+  notes?: string;
+}
+
+/** Set pieces the DM asked for in a city (meta.json `set`), resolved against the layout. */
+export interface CitySet {
+  sundial?: CitySundial & { tower: number; radius: number };
+}
+
 export interface City {
   name: string;
   /** The MFCG link the city came from. */
   url: string;
+  /** Set pieces the DM asked for (parseCity resolves them). */
+  set?: CitySet;
   roadWidth: number;
   towerRadius: number;
   wallThickness: number;
@@ -59,6 +87,8 @@ export interface HotSpot {
   secret?: boolean;
   /** Built when the DM first opens it, not when the city opens. */
   onDemand?: boolean;
+  /** The GM's notes for the place's journal page (set pieces). */
+  notes?: string;
 }
 
 /** Metres in one 5 ft battle-map square. */
@@ -66,7 +96,7 @@ export const M_PER_SQUARE = 1.524;
 
 const flip = (p: number[]): Pt => [p[0]!, -p[1]!];
 
-export function parseCity(json: unknown, meta: { name?: string; url: string }): City {
+export function parseCity(json: unknown, meta: { name?: string; url: string; set?: { sundial?: CitySundial } }): City {
   const fc = json as { features?: Array<Record<string, any>> };
   if (!fc || !Array.isArray(fc.features)) throw new Error("not a city export (no features)");
   const byId = new Map(fc.features.map((f) => [String(f.id), f]));
@@ -89,9 +119,27 @@ export function parseCity(json: unknown, meta: { name?: string; url: string }): 
   const districts: Array<{ name: string; ring: Ring }> = (geom("districts")?.geometries ?? []).filter((m: any) => m.type === "Polygon").map((m: any) => ({ name: String(m.name ?? "District").slice(0, 60), ring: (m.coordinates[0] as number[][]).map(flip) }));
   const treesG = geom("trees");
   const trees: Pt[] = treesG?.type === "MultiPoint" ? (treesG.coordinates as number[][]).map(flip) : [];
-  const buildings = polys("buildings");
+  let buildings = polys("buildings");
   if (!buildings.length) throw new Error("the city export has no buildings");
+  // A sundial tower: the plot under `at` is the tower's; the houses round it make way for the plaza.
+  let set: CitySet | undefined;
+  const sd = meta.set?.sundial;
+  if (sd && Array.isArray(sd.at) && sd.at.length === 2) {
+    const at: Pt = [Number(sd.at[0]), Number(sd.at[1])];
+    const d = (r: Ring) => Math.hypot(centroid(r)[0] - at[0], centroid(r)[1] - at[1]);
+    let tower = buildings.findIndex((r) => inside(at, r));
+    if (tower < 0) tower = buildings.reduce((best, r, i) => (d(r) < d(buildings[best]!) ? i : best), 0);
+    const ring = buildings[tower]!;
+    const c = centroid(ring);
+    const bb = bboxOf(ring);
+    const radius = sd.radius ?? Math.max(bb.w, bb.h) / 2 + 3.5;
+    const clear = sd.clear ?? radius + 2.5;
+    const nearest = (r: Ring) => Math.min(...r.map((p) => Math.hypot(p[0] - c[0], p[1] - c[1])));
+    buildings = buildings.filter((r, i) => i === tower || nearest(r) > clear);
+    set = { sundial: { ...sd, at, tower: buildings.indexOf(ring), radius } };
+  }
   const city: City = {
+    ...(set ? { set } : {}),
     name: meta.name ?? "City",
     url: meta.url,
     roadWidth: Number(values.roadWidth) || 8,

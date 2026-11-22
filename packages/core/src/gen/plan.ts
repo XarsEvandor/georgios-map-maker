@@ -142,6 +142,51 @@ export interface ScenePlan {
   street?: { city: string; area: { x: number; y: number; w: number; h: number }; focus?: string };
   /** A war map (gen/war.ts): an army's camp, or the field where armies fight. */
   war?: WarPlan;
+  /** A clock dial etched round a tower, its spires the hands (gen/sundial.ts); or the room under it. */
+  sundial?: SundialPlan;
+  /** People standing on the map as tokens with stats (the frozen intruders under the dial), placed by the generator. */
+  cast?: CastMember[];
+}
+
+export type Hand = "hour" | "minute" | "second";
+export type GemColor = "ruby" | "sapphire" | "topaz" | "emerald" | "amethyst";
+
+export interface SundialGemPlan {
+  /** The numeral (1..12) the gem is set into. */
+  numeral: number;
+  color: GemColor;
+  /** The hand whose shadow lights it. The players do not know this; the GM does. */
+  hand: Hand;
+}
+
+/**
+ * The sundial set piece (DESIGN.md section 38). On a street map the tower on plot `tower` keeps
+ * its roof, grows three spires and gets the dial etched round it; the hour shadow's tip is the way
+ * down. In an interior, `zone` is the room under the dial: the numerals show through its ceiling
+ * the other way round, the time device stands in the middle and the carved face by the door.
+ */
+export interface SundialPlan {
+  /** Street maps: the plot (city.buildings index) the tower stands on. */
+  tower?: number;
+  /** Interiors: the zone under the dial. */
+  zone?: string;
+  /** Ring radius: metres on a street map, squares in an interior. Default: from the tower's size or the room's. */
+  radius?: number;
+  /** One to three gems, each on its own numeral, each answering to its own hand. */
+  gems: SundialGemPlan[];
+  /** Where the hands stand: the numeral (1..12) each points at. */
+  stopped: Record<Hand, number>;
+  /** Shared by the plaza and the vestibule under it, so the GM's crank turns both. */
+  key?: string;
+  /** The place built below the dial: its pin goes on the door (street maps). */
+  belowPlace?: string;
+}
+
+export interface CastMember {
+  /** The token's name as shown. */
+  name: string;
+  /** A kind the module has a stat block and a figure for (commoner, knight, kobold, berserker, spy, ...). */
+  kind: string;
 }
 
 /** An army on a war map: its name, its colour ("#rrggbb") and the map edge it holds (a field) or its gate faces (a camp). */
@@ -231,6 +276,31 @@ export function validatePlan(input: unknown, knownZoneTypes?: Set<string>): Plan
     if (isObj(wr) && wr.machines !== undefined && (typeof wr.machines !== "number" || !Number.isInteger(wr.machines) || wr.machines < 0 || wr.machines > 5)) bad("war.machines", "must be a whole number 0..5");
     if (p.street !== undefined) bad("war", "a map is a street map or a war map, not both");
   }
+  if (p.sundial !== undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sd: any = p.sundial;
+    const hands = ["hour", "minute", "second"], colors = ["ruby", "sapphire", "topaz", "emerald", "amethyst"];
+    const numeral = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 12;
+    if (typeof sd !== "object" || sd === null || Array.isArray(sd)) bad("sundial", "must be an object with gems and stopped");
+    else {
+      if (sd.tower !== undefined && (!Number.isInteger(sd.tower) || sd.tower < 0)) bad("sundial.tower", "must be a plot index (a whole number, 0 or more)");
+      if (sd.tower !== undefined && p.street === undefined) bad("sundial.tower", "only a street map has plots; an interior names the zone under the dial");
+      if (sd.zone !== undefined && typeof sd.zone !== "string") bad("sundial.zone", "must name a zone");
+      if (sd.tower === undefined && sd.zone === undefined) bad("sundial", "needs the tower's plot (street maps) or the zone under the dial (interiors)");
+      if (sd.radius !== undefined && (typeof sd.radius !== "number" || !(sd.radius >= 2 && sd.radius <= 60))) bad("sundial.radius", "must be a number 2..60");
+      if (!Array.isArray(sd.gems) || sd.gems.length < 1 || sd.gems.length > 3 || !sd.gems.every((g: any) => typeof g === "object" && g !== null && numeral(g.numeral) && colors.includes(g.color) && hands.includes(g.hand))) bad("sundial.gems", `must be 1 to 3 of {numeral 1..12, color (${colors.join(", ")}), hand (${hands.join(", ")})}`);
+      else {
+        if (new Set(sd.gems.map((g: any) => g.numeral)).size !== sd.gems.length) bad("sundial.gems", "each gem needs its own numeral");
+        if (new Set(sd.gems.map((g: any) => g.hand)).size !== sd.gems.length) bad("sundial.gems", "each gem answers to its own hand");
+      }
+      if (!isObj(sd.stopped) || !hands.every((h) => numeral(sd.stopped[h]))) bad("sundial.stopped", "must give hour, minute and second as numerals 1..12");
+      if (sd.key !== undefined) id(sd.key, "sundial.key");
+      if (sd.belowPlace !== undefined) id(sd.belowPlace, "sundial.belowPlace");
+    }
+  }
+  if (p.cast !== undefined) {
+    if (!Array.isArray(p.cast) || p.cast.length > 24 || !p.cast.every((m: any) => isObj(m) && typeof m.name === "string" && m.name.length >= 1 && m.name.length <= 60 && typeof m.kind === "string" && /^[a-z][a-z0-9_]{0,29}$/i.test(m.kind))) bad("cast", "must be a list of at most 24 {name, kind}");
+  }
   if (p.mood !== undefined) {
     if (!isObj(p.mood)) bad("mood", "must be an object");
     else {
@@ -269,6 +339,7 @@ export function validatePlan(input: unknown, knownZoneTypes?: Set<string>): Plan
           else if (knownZoneTypes && !knownZoneTypes.has(z.type)) bad(`${path}.type`, `unknown room type ${z.type}; known: ${[...knownZoneTypes].join(", ")}`);
           if (z.area !== undefined && !["small", "medium", "large"].includes(z.area as string)) bad(`${path}.area`, "must be small, medium or large");
         });
+        if (isObj(p.sundial) && typeof p.sundial.zone === "string" && !zoneIds.has(p.sundial.zone)) bad("sundial.zone", `no zone ${p.sundial.zone}`);
       }
       if (lv.connections !== undefined) {
         if (!Array.isArray(lv.connections) || lv.connections.length > 64) bad("levels[0].connections", "must be a list (at most 64)");

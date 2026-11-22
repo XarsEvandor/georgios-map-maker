@@ -396,6 +396,16 @@ export const RECIPES: Recipe[] = [
       { kind: "decals", id: "worn_path", roles: [["dirt", 3], ["stain", 2], ["grime", 1]], perArea: 0.015, where: "anywhere" },
     ],
   },
+  // The hall under a sundial tower (gen/sundial.ts puts the dial, the device and the face in it): bare stone, pillars, a few lights.
+  {
+    type: "gothic.vestibule",
+    steps: [
+      { kind: "colonnade", id: "pillars", roles: ["pillar"], every: 4, inset: 1.2 },
+      { kind: "sconces", id: "light", roles: ["sconce", "torch", "candle"], every: 4 },
+      { kind: "corners", id: "corners", roles: [["pot_large", 1], ["crate", 1], ["bones", 1], ["candelabra", 2]], chance: 0.35 },
+      GRIME, COBWEBS,
+    ],
+  },
   {
     type: "gothic.vault",
     steps: [

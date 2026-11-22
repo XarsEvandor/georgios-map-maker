@@ -82,6 +82,8 @@ Cities from Azgaar's Fantasy Map Generator (the azgaar-foundry import) open as s
 
 Layouts are cached in `data/cities`. Watabou's generators are free to use, generated maps included ([FAQ](https://watabou.github.io/faq.html)).
 
+7. Set pieces: write `set` into a city's `data/cities/<key>.meta.json` and the city gets them the next time the GM opens its scene. `set.sundial` turns the wizard's tower into a sundial (DESIGN.md section 38): a point on the tower's plot, three gems on numerals with the hand each answers to (the GM's secret), where the hands stand, the frozen cast under the dial and the GM's notes. The tower keeps its roof and grows three spires, the houses round it make way for a plaza with a ring of Roman numerals, and a second, secret pin opens the vestibule under the dial (the time device, the carved face, the cast as tokens). The hands are tiles pivoting on the tower; the **Sundial** macro (or `api.sundial.crank("hour", 1)`) turns a hand on both scenes and lights the gems that sit under their own hand.
+
 ## Routes on the world map
 
 On the world map, pick **Route** in the left toolbar's **Georgios' Modules** group (the lion) and click towns: the first is the start, the last you clicked is the end, and the ones between are stops on the way. After each click the shortest way along the world's roads, trails and sea lanes is drawn again and its length shown. Right-click takes back the last town; Shift-click starts a new route. The **By land only** toggle beside it keeps routes off boats.

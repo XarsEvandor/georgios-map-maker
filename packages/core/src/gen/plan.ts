@@ -140,6 +140,23 @@ export interface ScenePlan {
   approach?: { depth?: number; width?: number };
   /** Street-level map of part of a city: the city's cache key and the area in metres (city.ts). */
   street?: { city: string; area: { x: number; y: number; w: number; h: number }; focus?: string };
+  /** A war map (gen/war.ts): an army's camp, or the field where armies fight. */
+  war?: WarPlan;
+}
+
+/** An army on a war map: its name, its colour ("#rrggbb") and the map edge it holds (a field) or its gate faces (a camp). */
+export interface WarSide {
+  name: string;
+  color: string;
+  edge?: Side;
+}
+
+export interface WarPlan {
+  /** "camp": one army's camp (sides[0]); "field": the ground between the sides' lines. */
+  kind: "camp" | "field";
+  sides: WarSide[];
+  /** Machines standing on the field (0 to 5), glowing in their craters. */
+  machines?: number;
 }
 
 export const LIMITS = {
@@ -201,6 +218,15 @@ export function validatePlan(input: unknown, knownZoneTypes?: Set<string>): Plan
     const st = p.street as Record<string, any>;
     if (!isObj(st) || typeof st.city !== "string" || !/^[0-9a-f]{8,40}$/.test(st.city) || !isObj(st.area) || !["x", "y", "w", "h"].every((k) => typeof (st.area as any)[k] === "number" && Number.isFinite((st.area as any)[k]))) bad("street", "must be {city, area: {x, y, w, h}}");
     else if ((st.area as any).w < 10 || (st.area as any).h < 10 || (st.area as any).w > 130 || (st.area as any).h > 130) bad("street.area", "must be 10 to 130 metres a side");
+  }
+  if (p.war !== undefined) {
+    const wr = p.war as Record<string, any>;
+    const sideOk = (s: any) => isObj(s) && typeof s.name === "string" && s.name.length >= 1 && s.name.length <= 60 && typeof s.color === "string" && /^#[0-9a-fA-F]{6}$/.test(s.color) && (s.edge === undefined || ["north", "south", "east", "west"].includes(String(s.edge)));
+    if (!isObj(wr) || (wr.kind !== "camp" && wr.kind !== "field")) bad("war", 'must be {kind: "camp" or "field", sides}');
+    else if (!Array.isArray(wr.sides) || wr.sides.length < 1 || wr.sides.length > 4 || !wr.sides.every(sideOk)) bad("war.sides", 'must be 1 to 4 sides, each {name, color "#rrggbb", edge?}');
+    else if (wr.kind === "field" && wr.sides.filter((s: any) => s.edge).length < 2) bad("war.sides", "a field needs at least two sides with an edge");
+    if (isObj(wr) && wr.machines !== undefined && (typeof wr.machines !== "number" || !Number.isInteger(wr.machines) || wr.machines < 0 || wr.machines > 5)) bad("war.machines", "must be a whole number 0..5");
+    if (p.street !== undefined) bad("war", "a map is a street map or a war map, not both");
   }
   if (p.mood !== undefined) {
     if (!isObj(p.mood)) bad("mood", "must be an object");

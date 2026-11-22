@@ -15,6 +15,7 @@ import { specOf, ZONE_TYPES } from "./rooms";
 import { buildStyles, type Style, type Wear } from "./style";
 import type { City } from "../city/city";
 import { generateStreet } from "../city/street";
+import { generateWar } from "./war";
 
 export interface ElementInfo {
   kind: "object" | "wall" | "door" | "window" | "floor" | "light" | "path";
@@ -155,6 +156,7 @@ export function generate(plan: ScenePlan, catalogOrIndex: Catalog | ConstructorP
     if (!opts.city) throw new Error("a street plan needs its city layout");
     return generateStreet(plan, cat, opts.city, { date: opts.date, houses: opts.houses, interiors: opts.interiors });
   }
+  if (plan.war) return generateWar(plan, cat, { date: opts.date });
   const rng = new Rng(plan.seed);
   const layout = layoutBuilding(plan, rng.fork("layout"));
   const roles = new Set<string>();

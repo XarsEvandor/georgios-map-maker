@@ -101,6 +101,8 @@ export const ROOM_SPECS: RoomSpec[] = [
     ["craft.mason", "Stonemason's yard (workbench, stone, statues in the making)", "stone", 9, 50],
   ] as const).map(([type, label, floor, lo, hi]) => S({ type, label, area: [lo, hi], minSide: 2, exterior: true, windowEvery: 3, floor })),
   S({ type: "street.area", label: "City streets (built from a city layout; set by the city tools, not by hand)", area: [100, 6400], minSide: 10, maxAspect: 4, windowEvery: 0, floor: "cobble", outdoor: true }),
+  S({ type: "war.camp", label: "An army's camp (a war map; set with the plan's war field, not by hand)", area: [400, 6400], minSide: 20, maxAspect: 3, windowEvery: 0, floor: "dirt", outdoor: true }),
+  S({ type: "war.field", label: "A battlefield between armies (a war map; set with the plan's war field, not by hand)", area: [400, 6400], minSide: 20, maxAspect: 3, windowEvery: 0, floor: "dirt", outdoor: true }),
   S({ type: "gothic.graveyard", label: "Graveyard", area: [100, 900], minSide: 6, maxAspect: 10, windowEvery: 0, floor: "dirt", outdoor: true }),
 ];
 

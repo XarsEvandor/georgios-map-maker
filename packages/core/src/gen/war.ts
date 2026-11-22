@@ -10,7 +10,8 @@
  *
  * A field: grass trampled to dirt and mud, scorched and cratered; each side's barricade line along
  * its edge with its banners; the dead of every side, their shields in their side's colour, nearer
- * their own line; dead horses, arrows, wrecked and burning siege engines; a road out; and, when
+ * their own line; dead horses, arrows, wrecked and burning siege engines; a road out (by the edge the
+ * plan names, else a free one); and, when
  * asked, machines standing in glowing craters, joined by cables and glowing.
  */
 
@@ -354,8 +355,10 @@ function warVersion(plan: ScenePlan, layout: Layout, cat: Catalog, kit: Kit, st:
     const edgeDist = (p: Vec, e: Side) => (e === "north" ? p[1] : e === "south" ? h - p[1] : e === "west" ? p[0] : w - p[0]);
     const inward = (e: Side): Vec => (e === "north" ? [0, 1] : e === "south" ? [0, -1] : e === "west" ? [1, 0] : [-1, 0]);
     const facing = (e: Side) => { const v = inward(e); return Math.atan2(v[1], v[0]) - Math.PI / 2; };
-    const roadEdge: Side | undefined = (["north", "south", "east", "west"] as Side[]).find((e) => !sides.some((s) => s.edge === e));
+    const roadEdge: Side | undefined = war.road ?? (["north", "south", "east", "west"] as Side[]).find((e) => !sides.some((s) => s.edge === e));
     const centre: Vec = [w / 2, h / 2];
+    // Where the road meets its edge, along that edge (a line leaves a gap for it).
+    const roadT = roadEdge === "north" || roadEdge === "south" ? w * (roadEdge === "north" ? 0.55 : 0.45) : h * 0.5;
     const craters: Vec[] = [];
     const machines: Vec[] = [];
     // Where the machines stand: a ring round the middle.
@@ -380,7 +383,7 @@ function warVersion(plan: ScenePlan, layout: Layout, cat: Catalog, kit: Kit, st:
 
     // The road out (toward the village) across the free edge, a worn trail along it.
     if (roadEdge && kit.road) {
-      const a: Vec = roadEdge === "north" ? [w * 0.55, -1] : roadEdge === "south" ? [w * 0.45, h + 1] : roadEdge === "west" ? [-1, h * 0.5] : [w + 1, h * 0.5];
+      const a: Vec = roadEdge === "north" ? [roadT, -1] : roadEdge === "south" ? [roadT, h + 1] : roadEdge === "west" ? [-1, roadT] : [w + 1, roadT];
       const pts: Vec[] = [a, [(a[0] + centre[0]) / 2 + rng.range(-3, 3), (a[1] + centre[1]) / 2 + rng.range(-3, 3)], [centre[0] + rng.range(-4, 4), centre[1] + rng.range(-2, 2)]];
       const id = b.addPath({ points: pts.map(px), texture: use(kit.road)!.res, width: 5 * S * 0.6, layer: LAYER.decal });
       elements[id] = { kind: "path", key: "road", zone: zoneId, asset: kit.road.id };
@@ -410,7 +413,7 @@ function warVersion(plan: ScenePlan, layout: Layout, cat: Catalog, kit: Kit, st:
       const lenAlong = e === "north" || e === "south" ? w : h;
       const at = (t: number, d: number): Vec => (e === "north" ? [t, d] : e === "south" ? [t, h - d] : e === "west" ? [d, t] : [w - d, t]);
       for (let t = 6; t < lenAlong - 6; t += 8.5) {
-        if (rng.next() < 0.2) continue;
+        if (rng.next() < 0.2 || (e === roadEdge && Math.abs(t - roadT) < 5)) continue;
         put(any(kit.barricades), at(t + rng.range(-1, 1), 5 + rng.range(-0.6, 0.6)), { rot: facing(e) + rng.range(-0.12, 0.12), feature: `line:${s.name}`, role: "barricade", occupy: "solid" });
       }
       // One engine still shooting behind the line, one wrecked and burning out in front of it.

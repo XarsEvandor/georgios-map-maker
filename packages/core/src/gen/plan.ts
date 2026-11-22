@@ -157,6 +157,8 @@ export interface WarPlan {
   sides: WarSide[];
   /** Machines standing on the field (0 to 5), glowing in their craters. */
   machines?: number;
+  /** The edge a road leaves the field by (default: an edge no side holds). */
+  road?: Side;
 }
 
 export const LIMITS = {
@@ -225,6 +227,7 @@ export function validatePlan(input: unknown, knownZoneTypes?: Set<string>): Plan
     if (!isObj(wr) || (wr.kind !== "camp" && wr.kind !== "field")) bad("war", 'must be {kind: "camp" or "field", sides}');
     else if (!Array.isArray(wr.sides) || wr.sides.length < 1 || wr.sides.length > 4 || !wr.sides.every(sideOk)) bad("war.sides", 'must be 1 to 4 sides, each {name, color "#rrggbb", edge?}');
     else if (wr.kind === "field" && wr.sides.filter((s: any) => s.edge).length < 2) bad("war.sides", "a field needs at least two sides with an edge");
+    if (isObj(wr) && wr.road !== undefined && !["north", "south", "east", "west"].includes(String(wr.road))) bad("war.road", "must be north, south, east or west");
     if (isObj(wr) && wr.machines !== undefined && (typeof wr.machines !== "number" || !Number.isInteger(wr.machines) || wr.machines < 0 || wr.machines > 5)) bad("war.machines", "must be a whole number 0..5");
     if (p.street !== undefined) bad("war", "a map is a street map or a war map, not both");
   }

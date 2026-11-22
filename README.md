@@ -94,6 +94,22 @@ Other modules can ask too: `api.route({ from, to, via, towns, land, draw, reveal
 
 Each realm on the world map has a colour of its own, picked from twelve so that neighbours look clearly different (an invader the DM steered in keeps its own); the colour washes over its land, deepens along its borders and tints its name. A world map drawn again (`world-build --stage render,bundle`) replaces the picture in Foundry the next time the GM loads the world; pins, journals and drawings stay.
 
+## War maps
+
+A plan with a `war` field builds an army's camp or the field between armies from 2MT's camp, siege, battle and sci-fi packs, one square to 5 ft:
+
+```json
+{ "id": "sough-war-field", "title": "Sough: the field", "seed": 1183204, "genre": "medieval", "size": { "w": 80, "h": 56 },
+  "levels": [{ "id": "ground", "zones": [{ "id": "field", "type": "war.field" }] }],
+  "war": { "kind": "field", "machines": 3, "road": "north",
+           "sides": [{ "name": "March", "color": "#e07b1a", "edge": "north" }, { "name": "Garanny", "color": "#2e7d32", "edge": "west" }] } }
+```
+
+- **Camp** (`"kind": "camp"`, one side; `edge` is where its gate faces): a palisade with real walls, watchtowers and stakes; the general's command tent open to show the war table, the chair and a rug in the army's colour; officers' tents in the colour; rows of canvas tents with fires; a depot, a horse line, archery butts and siege engines inside the gate. About 48 x 40 squares.
+- **Field** (`"kind": "field"`, two to four sides with the edge each holds): trampled, burnt, cratered ground; each side's barricade line along its edge with its banners, an engine behind and a burning wreck in front; the dead with their side's shields in its colour; a road out by `road` (else a free edge); and `machines` (0 to 5) standing in glowing craters, cabled together. About 80 x 56 squares.
+
+Send the plan with the companion's `maps.setPlan`, then build the scene as usual (`api.buildScene(id, "v1")`).
+
 ## Command line
 
 ```powershell

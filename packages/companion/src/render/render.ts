@@ -22,6 +22,8 @@ export interface RenderOptions {
   quality?: number;
   /** Numbered labels at these square positions (for chat references). */
   labels?: Array<{ x: number; y: number; text: string }>;
+  /** Letters cut into the ground (a sundial's numerals): drawn on the floor, under walls and objects. Squares; rot in radians. */
+  etchings?: Array<{ text: string; at: [number, number]; rot: number; size: number }>;
   /** Gate leaves by portal node id (generate.ts ElementInfo.leaf). */
   leaves?: Record<string, LeafSpec & { width: number }>;
   /** "closed": draw gate leaves shut (previews); "hide": leave the opening for Foundry to draw them. */
@@ -227,6 +229,21 @@ export async function renderMap(map: Json, src: AssetSource, opts: RenderOptions
     const mask = Buffer.from(`<svg width="${bw}" height="${bh}" xmlns="http://www.w3.org/2000/svg"><polygon points="${poly}" fill="#fff"/></svg>`);
     const clipped = await sharp(fill).composite([{ input: mask, blend: "dest-in" }]).png().toBuffer();
     layers.push({ input: clipped, left: x0, top: y0 });
+  }
+
+  // 3b. Etchings: letters cut into the stone, a dark cut with a pale lip below it, turned as asked.
+  if (opts.etchings?.length) {
+    let s = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`;
+    for (const e of opts.etchings) {
+      const cx = e.at[0] * pps, cy = e.at[1] * pps, fs = Math.max(8, e.size * pps), deg = (e.rot * 180) / Math.PI;
+      const text = e.text.replace(/[<>&"']/g, "");
+      const lip = Math.max(1, fs * 0.045);
+      const font = `font-family="Georgia, 'Times New Roman', Times, serif" font-size="${fs.toFixed(1)}" font-weight="bold" text-anchor="middle"`;
+      s += `<g transform="rotate(${deg.toFixed(2)} ${cx.toFixed(1)} ${cy.toFixed(1)})">`
+        + `<text x="${(cx + lip).toFixed(1)}" y="${(cy + fs * 0.36 + lip).toFixed(1)}" ${font} fill="rgba(255,248,230,0.42)">${text}</text>`
+        + `<text x="${cx.toFixed(1)}" y="${(cy + fs * 0.36).toFixed(1)}" ${font} fill="rgba(26,20,14,0.66)">${text}</text></g>`;
+    }
+    layers.push({ input: Buffer.from(`${s}</svg>`), left: 0, top: 0 });
   }
 
   // 4. Walls (with a soft shadow), 5. portals.

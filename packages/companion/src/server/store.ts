@@ -11,6 +11,7 @@ import {
   type Box, type Person, type City, type HotSpot, type Pt,
   type AssetIndex, type Directive, type FoundrySceneData, type GeneratedMap, type GeneratedVersion, type Genre, type Lock, type RoundTripResult, type ScenePlan,
 } from "@gmm/core";
+import sharp from "sharp";
 import type { AssetSource } from "../assets/source";
 import { leafImage, renderMap, type RenderOptions } from "../render/render";
 import { cityKey, cityLink, fetchCityJson } from "../city/fetch";
@@ -31,14 +32,15 @@ export interface CityInfo {
   hotspots: CityPlace[];
 }
 
-/** A place with a pin on the city scene (pixels of the city image). Shops carry their trade and icon. */
-export interface CityPlace { id: string; kind: string; label: string; x: number; y: number; onDemand?: boolean; street?: boolean; trade?: string; icon?: string; secret?: boolean }
+/** A place with a pin on the city scene (pixels of the city image). Shops carry their trade and icon; set pieces the GM's notes. */
+export interface CityPlace { id: string; kind: string; label: string; x: number; y: number; onDemand?: boolean; street?: boolean; trade?: string; icon?: string; secret?: boolean; notes?: string }
 
 function placesOf(city: City, toPx: (p: Pt) => Pt): CityPlace[] {
   return allHotSpots(city).map((h) => ({
     id: h.id, kind: h.kind, label: h.label, x: Math.round(toPx(h.at)[0]), y: Math.round(toPx(h.at)[1]),
     ...(h.onDemand ? { onDemand: true } : {}), ...(h.area ? { street: true } : {}), ...(h.trade ? { trade: h.trade } : {}),
     ...(h.icon ?? (h.trade ? TRADES[h.trade].icon : undefined) ? { icon: h.icon ?? TRADES[h.trade!].icon } : {}), ...(h.secret ? { secret: true } : {}),
+    ...(h.notes ? { notes: h.notes } : {}),
   }));
 }
 
@@ -215,7 +217,7 @@ export class MapStore {
     let r = this.renders.get(key);
     if (!r) {
       const labels = opts.labeled ? this.labels(id, v.id).map((l) => ({ x: l.x, y: l.y, text: String(l.n) })) : undefined;
-      r = renderMap(v.map, this.src, { leaves: this.leaves(id, v.id), leafMode: "closed", ...opts, labels });
+      r = renderMap(v.map, this.src, { leaves: this.leaves(id, v.id), leafMode: "closed", etchings: v.sundial?.etchings, ...opts, labels });
       this.renders.set(key, r);
       r.catch(() => this.renders.delete(key));
     }
@@ -235,7 +237,24 @@ export class MapStore {
     const v = this.version(id, version);
     const doors = Object.fromEntries(Object.entries(v.elements).filter(([, e]) => e.kind === "door").map(([nid, e]) => [nid, { state: e.state, width: e.width, leaf: e.leaf }]));
     const decorative = new Set(Object.entries(v.elements).filter(([, e]) => e.kind === "wall" && /^(quay|pier)#/.test(e.key)).map(([nid]) => nid));
-    return toFoundryScene(v.map, { name: `${s.plan.title ?? s.id} (${v.name})`, pps, doors, decorative, sheltered: v.sheltered ?? shelterOf(s.gen.layout) });
+    return toFoundryScene(v.map, { name: `${s.plan.title ?? s.id} (${v.name})`, pps, doors, decorative, sheltered: v.sheltered ?? shelterOf(s.gen.layout), sundial: v.sundial });
+  }
+
+  /**
+   * A sundial hand's shadow as a PNG for its Foundry tile: the image is twice the hand's length,
+   * the shadow on its upper half from the middle (the tower) up, soft-edged, darkest at the tower.
+   */
+  async handPng(id: string, version: string | undefined, hand: string, pps = 100): Promise<Buffer> {
+    const v = this.version(id, version);
+    const h = v.sundial?.hands.find((x) => x.hand === hand);
+    if (!h) throw new Error(`map ${id} has no ${hand} hand`);
+    const L = Math.max(pps, Math.round(h.length * pps)), W = Math.max(16, Math.round(h.width * pps * 2.4));
+    const bw = Math.max(3, h.width * pps), cx = W / 2;
+    const svg = `<svg width="${W}" height="${2 * L}" xmlns="http://www.w3.org/2000/svg">`
+      + `<defs><linearGradient id="g" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#0b0a10" stop-opacity="${h.alpha.toFixed(2)}"/><stop offset="0.85" stop-color="#0b0a10" stop-opacity="${(h.alpha * 0.8).toFixed(2)}"/><stop offset="1" stop-color="#0b0a10" stop-opacity="0"/></linearGradient></defs>`
+      + `<rect x="${(cx - bw / 2).toFixed(1)}" y="${(L * 0.04).toFixed(1)}" width="${bw.toFixed(1)}" height="${(L * 0.96).toFixed(1)}" rx="${(bw / 2).toFixed(1)}" fill="url(#g)"/>`
+      + `<circle cx="${cx}" cy="${L}" r="${(bw * 0.9).toFixed(1)}" fill="#0b0a10" fill-opacity="${h.alpha.toFixed(2)}"/></svg>`;
+    return sharp(Buffer.from(svg)).blur(Math.max(0.6, bw * 0.18)).png().toBuffer();
   }
 
   /** Townsfolk for a built map, in scene pixels (token top-left corners), with the way each faces as a token rotation. */
@@ -281,7 +300,7 @@ export class MapStore {
     if (!/^[0-9a-f]{8,40}$/.test(key)) throw new Error("bad city key");
     const hit = this.cities.get(key);
     if (hit) return hit.city;
-    const meta = JSON.parse(await readFile(join(this.cityDir(), `${key}.meta.json`), "utf8")) as { url: string; name: string };
+    const meta = JSON.parse(await readFile(join(this.cityDir(), `${key}.meta.json`), "utf8")) as { url: string; name: string; set?: Parameters<typeof parseCity>[1]["set"] };
     const json = JSON.parse(await readFile(join(this.cityDir(), `${key}.json`), "utf8"));
     const city = parseCity(json, meta);
     this.cities.set(key, { city });
@@ -295,8 +314,11 @@ export class MapStore {
     const cityName = (name ?? link.searchParams.get("name") ?? "City").slice(0, 60);
     await mkdir(this.cityDir(), { recursive: true });
     const json = await fetchCityJson(url, this.dataDir);
-    await writeFile(join(this.cityDir(), `${key}.meta.json`), JSON.stringify({ url: link.toString(), name: cityName }));
-    const city = parseCity(json, { url: link.toString(), name: cityName });
+    // Set pieces the DM wrote into the city's meta file stay through a fresh open.
+    const old = await readFile(join(this.cityDir(), `${key}.meta.json`), "utf8").then((s) => JSON.parse(s) as { set?: Parameters<typeof parseCity>[1]["set"] }).catch(() => undefined);
+    const meta = { url: link.toString(), name: cityName, ...(old?.set ? { set: old.set } : {}) };
+    await writeFile(join(this.cityDir(), `${key}.meta.json`), JSON.stringify(meta));
+    const city = parseCity(json, meta);
     const image = await renderCity(city, this.src, this.index);
     this.cities.set(key, { city, image });
     await writeFile(join(this.cityDir(), `${key}.webp`), image.image);
@@ -308,6 +330,8 @@ export class MapStore {
 
   /** Draws a city already opened again from its saved layout (new places of interest change its art). */
   async refreshCity(key: string): Promise<CityInfo> {
+    // The meta file may have gained set pieces since the city was read: read it again.
+    this.cities.delete(key);
     const city = await this.city(key);
     const meta = JSON.parse(await readFile(join(this.cityDir(), `${key}.meta.json`), "utf8")) as { name: string };
     const image = await renderCity(city, this.src, this.index);
@@ -320,6 +344,11 @@ export class MapStore {
   async cityPlaces(key: string): Promise<CityPlace[]> {
     const city = await this.city(key);
     return placesOf(city, cityScale(city).toPx);
+  }
+
+  /** Whether the city has set pieces the DM asked for (meta.json `set`): they change the city's art, so its scene is drawn again. */
+  async citySet(key: string): Promise<boolean> {
+    return !!(await this.city(key)).set;
   }
 
   async cityImage(key: string): Promise<Buffer> {

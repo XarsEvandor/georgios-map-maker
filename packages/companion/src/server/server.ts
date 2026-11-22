@@ -110,21 +110,23 @@ export class CompanionServer {
       }
       case "city.places": {
         if (!/^[0-9a-f]{8,40}$/.test(String(p.city))) throw new Error("bad city key");
-        return { hotspots: await s.cityPlaces(String(p.city)) };
+        return { hotspots: await s.cityPlaces(String(p.city)), set: await s.citySet(String(p.city)) };
       }
       case "city.build": {
         const key = String(p.city);
         const time = ["day", "dusk", "night"].includes(p.time) ? p.time : undefined;
         const m = p.hotspot ? await s.buildHotspot(key, String(p.hotspot), time) : p.rect ? await s.buildArea(key, { x: Number(p.rect.x), y: Number(p.rect.y), w: Number(p.rect.w), h: Number(p.rect.h) }, time) : undefined;
         if (!m) throw new Error("hotspot or rect required");
-        return { mapId: m.id, title: m.plan.title, version: m.plan.versions?.picked ?? m.gen.versions[0]?.id };
+        return { mapId: m.id, title: m.plan.title, version: m.plan.versions?.picked ?? m.gen.versions[0]?.id, street: !!m.plan.street };
       }
       case "maps.export": {
         const pps = Math.max(32, Math.min(256, Number(p.pps ?? 100)));
         const vid = s.version(String(p.mapId), p.version).id;
         const scene = s.exportScene(String(p.mapId), p.version, pps);
         const leaves = scene.walls.filter((w) => w.animation?.texture.startsWith("leaf:")).map((w) => ({ portal: w.animation!.texture.slice(5), path: `/leaf/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}/${encodeURIComponent(w.animation!.texture.slice(5))}` }));
-        return { scene, imagePath: `/image/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}?pps=${pps}&leaves=hide`, leaves };
+        // A sundial's hands: their shadows as images for the tiles.
+        const hands = (scene.tiles ?? []).filter((t) => t.texture.src.startsWith("hand:")).map((t) => ({ hand: t.texture.src.slice(5), path: `/hand/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}/${encodeURIComponent(t.texture.src.slice(5))}?pps=${pps}` }));
+        return { scene, imagePath: `/image/${encodeURIComponent(p.mapId)}/${encodeURIComponent(vid)}?pps=${pps}&leaves=hide`, leaves, hands };
       }
       case "maps.people": {
         const pps = Math.max(32, Math.min(256, Number(p.pps ?? 100)));
@@ -244,6 +246,13 @@ export class CompanionServer {
       const lm = /^\/leaf\/([^/]+)\/([^/]+)\/([0-9a-f]{1,12})$/i.exec(url.pathname);
       if (req.method === "GET" && lm) {
         const png = await this.o.store.leafPng(decodeURIComponent(lm[1]!), decodeURIComponent(lm[2]!), lm[3]!);
+        res.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" });
+        return void res.end(png);
+      }
+      const hm = /^\/hand\/([^/]+)\/([^/]+)\/(hour|minute|second)$/.exec(url.pathname);
+      if (req.method === "GET" && hm) {
+        const pps = Math.max(16, Math.min(256, Number(url.searchParams.get("pps") ?? 100)));
+        const png = await this.o.store.handPng(decodeURIComponent(hm[1]!), decodeURIComponent(hm[2]!), hm[3]!, pps);
         res.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" });
         return void res.end(png);
       }

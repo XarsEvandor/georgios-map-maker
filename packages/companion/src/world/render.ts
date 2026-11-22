@@ -339,68 +339,92 @@ export async function renderWorld(az: AzWorld, w: AgedWorld, src: AssetSource, i
     const px = townPx(b), fs = b.capital ? 46 : b.population >= 12 ? 36 : 27;
     return [b.x * S - px / 2, b.y * S - px * 0.6, b.x * S + px * 0.45 + b.name.length * fs * 0.55, (b.y + 4) * S + px * 0.3] as const;
   });
+  // A realm's land in connected pieces, biggest first.
+  const piecesOf = (cells: AzCell[]): AzCell[][] => {
+    const own = new Set(cells.map((c) => c.i));
+    const seen = new Set<number>();
+    const out: AzCell[][] = [];
+    for (const c of cells) {
+      if (seen.has(c.i)) continue;
+      const piece: AzCell[] = [];
+      const stack = [c.i];
+      seen.add(c.i);
+      while (stack.length) {
+        const i = stack.pop()!;
+        piece.push(C[i]!);
+        for (const n of C[i]!.c) if (own.has(n) && !seen.has(n)) { seen.add(n); stack.push(n); }
+      }
+      out.push(piece);
+    }
+    return out.sort((a, b) => b.length - a.length);
+  };
   for (const s of w.states.filter((x) => x.alive)) {
-    const own = C.filter((c) => land[c.i] && state[c.i] === s.id);
+    const all = C.filter((c) => land[c.i] && state[c.i] === s.id);
     // Free cities and lordships of a few cells are named by their capital's label already.
-    if (own.length < 20 || s.form === "Free City") continue;
-    const cx = own.reduce((t, c) => t + c.p[0], 0) / own.length, cy = own.reduce((t, c) => t + c.p[1], 0) / own.length;
-    // The interior cell nearest the middle (all neighbours in the realm).
-    const inner = own.filter((c) => c.c.every((n) => state[n] === s.id));
-    const near = (inner.length ? inner : own).sort((a, b) => Math.hypot(a.p[0] - cx, a.p[1] - cy) - Math.hypot(b.p[0] - cx, b.p[1] - cy));
-    const fs = Math.max(40, Math.min(115, 20 + Math.sqrt(own.length) * 4.6));
-    const label = s.form === "Free City" ? s.name.toUpperCase() : s.fullName.toUpperCase();
-    // A long name over a small realm may go on two or three lines.
-    const xs = own.map((c) => c.p[0]), ys = own.map((c) => c.p[1]);
-    const span = (Math.max(...xs) - Math.min(...xs)) * S;
-    const words = label.split(" ");
-    const splits: string[][] = [[label]];
-    // Any name of several words may break into lines when the realm has no room for it on one.
-    if (words.length > 1) {
-      let two: string[] = [], three: string[] = [];
-      const longest = (ls: string[]) => Math.max(...ls.map((l) => l.length));
-      for (let i = 1; i < words.length; i++) {
-        const t = [words.slice(0, i).join(" "), words.slice(i).join(" ")];
-        if (!two.length || longest(t) < longest(two)) two = t;
-        for (let j = i + 1; j < words.length; j++) {
-          const u = [words.slice(0, i).join(" "), words.slice(i, j).join(" "), words.slice(j).join(" ")];
-          if (!three.length || longest(u) < longest(three)) three = u;
+    if (all.length < 20 || s.form === "Free City") continue;
+    // A realm in several pieces (land cut off by a neighbour) is named on each piece of some size:
+    // the biggest with its full name, the others with its short one.
+    const pieces = piecesOf(all).filter((p, k) => k === 0 || p.length >= 20);
+    for (const [piece, own] of pieces.entries()) {
+      const cx = own.reduce((t, c) => t + c.p[0], 0) / own.length, cy = own.reduce((t, c) => t + c.p[1], 0) / own.length;
+      // The interior cell nearest the middle (all neighbours in the realm).
+      const inner = own.filter((c) => c.c.every((n) => state[n] === s.id));
+      const near = (inner.length ? inner : own).sort((a, b) => Math.hypot(a.p[0] - cx, a.p[1] - cy) - Math.hypot(b.p[0] - cx, b.p[1] - cy));
+      const fs = Math.max(40, Math.min(115, 20 + Math.sqrt(own.length) * 4.6));
+      const label = piece > 0 || s.form === "Free City" ? s.name.toUpperCase() : s.fullName.toUpperCase();
+      // A long name over a small realm may go on two or three lines.
+      const xs = own.map((c) => c.p[0]), ys = own.map((c) => c.p[1]);
+      const span = (Math.max(...xs) - Math.min(...xs)) * S;
+      const words = label.split(" ");
+      const splits: string[][] = [[label]];
+      // Any name of several words may break into lines when the realm has no room for it on one.
+      if (words.length > 1) {
+        let two: string[] = [], three: string[] = [];
+        const longest = (ls: string[]) => Math.max(...ls.map((l) => l.length));
+        for (let i = 1; i < words.length; i++) {
+          const t = [words.slice(0, i).join(" "), words.slice(i).join(" ")];
+          if (!two.length || longest(t) < longest(two)) two = t;
+          for (let j = i + 1; j < words.length; j++) {
+            const u = [words.slice(0, i).join(" "), words.slice(i, j).join(" "), words.slice(j).join(" ")];
+            if (!three.length || longest(u) < longest(three)) three = u;
+          }
         }
+        if (label.length > 22 && label.length * fs * 0.86 > span * 1.2) splits.shift();
+        splits.push(two);
+        if (three.length && label.length > 22) splits.push(three);
       }
-      if (label.length > 22 && label.length * fs * 0.86 > span * 1.2) splits.shift();
-      splits.push(two);
-      if (three.length && label.length > 22) splits.push(three);
-    }
-    // The spot nearest the middle where the name covers no town or its name.
-    const reach = 0.35 * Math.max(span, (Math.max(...ys) - Math.min(...ys)) * S);
-    const boxOf = (c: AzCell, ls: string[], f = fs) => {
-      const tw = Math.max(...ls.map((l) => l.length)) * f * 0.86, y0 = c.p[1] * S - (ls.length - 1) * f * 0.6;
-      return [c.p[0] * S - tw / 2, y0 - f, c.p[0] * S + tw / 2, y0 - f + f * 1.2 * ls.length] as const;
-    };
-    const clear = (b: readonly [number, number, number, number]) => !townBoxes.some(([a, c, d, e]) => b[0] < d && b[2] > a && b[1] < e && b[3] > c);
-    // How much of the name lies on the realm's own land (of nine points over its box).
-    const own9 = (b: readonly [number, number, number, number]) => {
-      let n = 0;
-      for (const fx of [0.04, 0.5, 0.96]) for (const fy of [0.15, 0.5, 0.85]) {
-        const c = cellAt((b[0] + (b[2] - b[0]) * fx) / S, (b[1] + (b[3] - b[1]) * fy) / S);
-        if (c && land[c.i] && state[c.i] === s.id) n++;
+      // The spot nearest the middle where the name covers no town or its name.
+      const reach = 0.35 * Math.max(span, (Math.max(...ys) - Math.min(...ys)) * S);
+      const boxOf = (c: AzCell, ls: string[], f = fs) => {
+        const tw = Math.max(...ls.map((l) => l.length)) * f * 0.86, y0 = c.p[1] * S - (ls.length - 1) * f * 0.6;
+        return [c.p[0] * S - tw / 2, y0 - f, c.p[0] * S + tw / 2, y0 - f + f * 1.2 * ls.length] as const;
+      };
+      const clear = (b: readonly [number, number, number, number]) => !townBoxes.some(([a, c, d, e]) => b[0] < d && b[2] > a && b[1] < e && b[3] > c);
+      // How much of the name lies on the realm's own land (of nine points over its box).
+      const own9 = (b: readonly [number, number, number, number]) => {
+        let n = 0;
+        for (const fx of [0.04, 0.5, 0.96]) for (const fy of [0.15, 0.5, 0.85]) {
+          const c = cellAt((b[0] + (b[2] - b[0]) * fx) / S, (b[1] + (b[3] - b[1]) * fy) / S);
+          if (c && land[c.i] && state[c.i] === s.id) n++;
+        }
+        return n;
+      };
+      // First a spot where the whole name lies on the realm's land (on one line or broken, at full
+      // size, then a fifth smaller), looking a little farther out than the middle; then one where
+      // most of it does; then any spot near the middle.
+      let at = near[0]!, lines = splits[0]!, size = fs;
+      search: for (const [need, far, scale] of [[9, 1.8, 1], [9, 1.8, 0.8], [7, 1.8, 1], [7, 1.8, 0.8], [0, 1, 1]] as const) for (const ls of splits) for (const c of near) {
+        if (Math.hypot(c.p[0] - cx, c.p[1] - cy) * S > reach * far) break;
+        const box = boxOf(c, ls, fs * scale);
+        if (clear(box) && (!need || own9(box) >= need)) { at = c; lines = ls; size = fs * scale; break search; }
       }
-      return n;
-    };
-    // First a spot where the whole name lies on the realm's land (on one line or broken, at full
-    // size, then a fifth smaller), looking a little farther out than the middle; then one where
-    // most of it does; then any spot near the middle.
-    let at = near[0]!, lines = splits[0]!, size = fs;
-    search: for (const [need, far, scale] of [[9, 1.8, 1], [9, 1.8, 0.8], [7, 1.8, 1], [7, 1.8, 0.8], [0, 1, 1]] as const) for (const ls of splits) for (const c of near) {
-      if (Math.hypot(c.p[0] - cx, c.p[1] - cy) * S > reach * far) break;
-      const box = boxOf(c, ls, fs * scale);
-      if (clear(box) && (!need || own9(box) >= need)) { at = c; lines = ls; size = fs * scale; break search; }
+      const [bx0, by0, bx1, by1] = boxOf(at, lines, size);
+      const y0 = at.p[1] * S - (lines.length - 1) * size * 0.6;
+      free(bx0, by0, bx1 - bx0, by1 - by0);
+      // The realm's name in a dark shade of its own colour.
+      const ink = mix(stateColor.get(s.id) ?? "#6b4a35", "#2a1d12", 0.45);
+      lines.forEach((l, k) => parts.push(`<text x="${f1(at.p[0] * S)}" y="${f1(y0 + k * size * 1.2)}" font-family="Georgia, serif" font-size="${f1(size)}" letter-spacing="${f1(size * 0.22)}" text-anchor="middle" fill="${ink}" opacity="0.8" ${halo} stroke-width="${f1(size / 7)}">${esc(l)}</text>`));
     }
-    const [bx0, by0, bx1, by1] = boxOf(at, lines, size);
-    const y0 = at.p[1] * S - (lines.length - 1) * size * 0.6;
-    free(bx0, by0, bx1 - bx0, by1 - by0);
-    // The realm's name in a dark shade of its own colour.
-    const ink = mix(stateColor.get(s.id) ?? "#6b4a35", "#2a1d12", 0.45);
-    lines.forEach((l, k) => parts.push(`<text x="${f1(at.p[0] * S)}" y="${f1(y0 + k * size * 1.2)}" font-family="Georgia, serif" font-size="${f1(size)}" letter-spacing="${f1(size * 0.22)}" text-anchor="middle" fill="${ink}" opacity="0.8" ${halo} stroke-width="${f1(size / 7)}">${esc(l)}</text>`));
   }
   for (const b of [...alive].sort((x, y) => Number(y.capital) - Number(x.capital) || y.population - x.population)) {
     if (!b.capital && b.population < 3) continue;

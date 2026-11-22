@@ -35,5 +35,18 @@ describe("maps.route: the way between two towns, in words and as a picture", () 
     expect(lost.unknown![0]!.name).toBe("Nokron");
     expect(lost.text).toContain('No town called "Nokron" on the map; the nearest names: ');
     await expect(worldRoute(data, "../etc", "a", "b")).rejects.toThrow(/bad world id/);
+    // Through a town on the way: its stop is marked, and the text says so.
+    const via = await worldRoute(data, "testworld", "Narkoc", "Zugkatil", { via: ["Midhollow"], image: false });
+    expect(via.route!.via).toEqual(["Midhollow"]);
+    expect(via.route!.stops.map((s) => s.name)).toEqual(["Narkoc", "Midhollow", "Zugkatil"]);
+    expect(via.text).toContain("Narkoc to Zugkatil through Midhollow: 60 mi");
+    expect(via.image).toBeUndefined();
+    // A stop that is no town is named back with its nearest names; so is a start.
+    const lostVia = await worldRoute(data, "testworld", "Narkoc", "Zugkatil", { via: ["Midholow", "Atlantis"] });
+    expect(lostVia.found).toBe(false);
+    expect(lostVia.unknown!.map((u) => u.name)).toEqual(["Atlantis"]);
+    // By land only, when asked: no second way offered.
+    const land = await worldRoute(data, "testworld", "Narkoc", "Zugkatil", { land: true, image: false });
+    expect([land.land, land.text?.includes("By land only, as asked")]).toEqual([null, true]);
   });
 });

@@ -148,3 +148,7 @@ body > #gmm-clock { position: fixed; top: 8px; left: 50%; transform: translateX(
   -webkit-mask: url("../assets/lion.svg") center / contain no-repeat;
   mask: url("../assets/lion.svg") center / contain no-repeat;
 }
+.gmm-route-form { display: flex; flex-direction: column; gap: 6px; }
+.gmm-route-form label { display: flex; flex-direction: column; gap: 2px; }
+.gmm-route-form label.gmm-check { flex-direction: row; align-items: center; gap: 6px; }
+.gmm-meta { opacity: 0.75; font-size: 0.9em; }

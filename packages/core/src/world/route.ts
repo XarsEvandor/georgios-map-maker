@@ -3,7 +3,8 @@
  * sea lanes (Azgaar's routes, kept in the aged world), how long each stretch is, the towns, realms
  * and terrain it passes, and the way by land only when the shortest one takes a boat. Lengths come
  * from the map's own scale. Town names are matched loosely ("narkoc", "Narkóc"), and a name that
- * matches no town gets the nearest names back as suggestions.
+ * matches no town gets the nearest names back as suggestions. A journey can pass through towns on
+ * the way (findJourney): the shortest way from each to the next.
  */
 
 /** The parts of an aged world (aged.json) a route needs. */
@@ -31,6 +32,10 @@ export interface RouteLeg {
 export interface Route {
   from: string;
   to: string;
+  /** Towns the way was asked to pass through, in order (a journey with stops). */
+  via?: string[];
+  /** Where each asked-for town stands (start, stops, end), in world-map pixels. */
+  stops: Array<{ name: string; point: [number, number] }>;
   miles: number;
   straightMiles: number;
   legs: RouteLeg[];
@@ -236,7 +241,8 @@ export function findRoute(w: RouteWorld, a: NonNullable<RouteWorld["burgs"][numb
     return [Math.round(x * s.pxPerUnit), Math.round(y * s.pxPerUnit)];
   };
   return {
-    from: a.name, to: b.name, miles: dist.get(b.cell) ?? straightMiles, straightMiles, legs, byKind,
+    from: a.name, to: b.name, stops: [{ name: a.name, point: px(a.cell) }, { name: b.name, point: px(b.cell) }],
+    miles: dist.get(b.cell) ?? straightMiles, straightMiles, legs, byKind,
     towns, realms,
     terrain: [...terrain].sort((x, y) => y[1] - x[1]).map(([t, miles]) => ({ terrain: t, miles })),
     points: [px(a.cell), ...steps.map((st) => px(st.to))],
@@ -244,12 +250,48 @@ export function findRoute(w: RouteWorld, a: NonNullable<RouteWorld["burgs"][numb
   };
 }
 
+/**
+ * A journey through several towns in order (the first is the start, the last the end): the shortest
+ * way between each pair, joined. The towns in between end one stretch and start the next. Null when
+ * fewer than two different towns are left after dropping repeats in a row.
+ */
+export function findJourney(w: RouteWorld, stops: Array<NonNullable<RouteWorld["burgs"][number]>>, s: Scale, o: { land?: boolean } = {}): Route | null {
+  const list = stops.filter((t, i) => i === 0 || t.id !== stops[i - 1]!.id);
+  if (list.length < 2) return null;
+  const parts = list.slice(1).map((t, i) => findRoute(w, list[i]!, t, s, o)!);
+  if (parts.length === 1) return parts[0]!;
+  const first = list[0]!;
+  const last = list.at(-1)!;
+  const byKind: Partial<Record<LegKind, number>> = {};
+  const terrain = new Map<string, number>();
+  const realms: string[] = [];
+  const towns: string[] = [];
+  for (const [i, p] of parts.entries()) {
+    for (const [k, v] of Object.entries(p.byKind) as Array<[LegKind, number]>) byKind[k] = (byKind[k] ?? 0) + v;
+    for (const t of p.terrain) terrain.set(t.terrain, (terrain.get(t.terrain) ?? 0) + t.miles);
+    for (const r of p.realms) if (realms.at(-1) !== r) realms.push(r);
+    for (const t of [...p.towns, ...(i < parts.length - 1 ? [p.to] : [])]) if (towns.at(-1) !== t) towns.push(t);
+  }
+  return {
+    from: first.name, to: last.name, via: list.slice(1, -1).map((t) => t.name),
+    stops: [parts[0]!.stops[0]!, ...parts.map((p) => p.stops[1]!)],
+    miles: parts.reduce((n, p) => n + p.miles, 0),
+    straightMiles: Math.hypot(first.x - last.x, first.y - last.y) * s.pxPerUnit * s.milesPerPx,
+    legs: parts.flatMap((p) => p.legs.map((l) => ({ ...l }))),
+    byKind, towns, realms,
+    terrain: [...terrain].sort((x, y) => y[1] - x[1]).map(([t, miles]) => ({ terrain: t, miles })),
+    points: parts.flatMap((p, i) => (i ? p.points.slice(1) : p.points)),
+    steps: parts.flatMap((p) => p.steps),
+  };
+}
+
 const mi = (n: number) => `${Math.round(n)} mi`;
 
 /** The route in plain words, for the GM's assistant. */
 export function routeText(r: Route, land?: Route | null): string {
+  const through = r.via?.length ? ` through ${r.via.join(", then ")}` : "";
   const lines = [
-    `${r.from} to ${r.to}: ${mi(r.miles)} by the shortest way (${mi(r.straightMiles)} in a straight line).`,
+    `${r.from} to ${r.to}${through}: ${mi(r.miles)} by the shortest way${through ? " that passes there" : ""} (${mi(r.straightMiles)} in a straight line).`,
     `Stretches, in order: ${r.legs.map((l) => `${l.kind} ${mi(l.miles)}${l.from && l.to ? ` (${l.from} to ${l.to})` : ""}`).join("; ")}.`,
     `In all: ${Object.entries(r.byKind).map(([k, v]) => `${k} ${mi(v!)}`).join(", ")}.`,
     r.towns.length ? `Towns on the way: ${r.towns.join(", ")}.` : "No towns on the way.",

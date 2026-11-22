@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findRoute, findTown, routeText, type RouteWorld } from "../src/index";
+import { findJourney, findRoute, findTown, routeText, type RouteWorld } from "../src/index";
 
 // A small world: Port A --road--> Mid --trail--> B, and a shorter sea lane Port A -> B; Hermit off every route.
 // Azgaar units; 1 unit = 5 map px; 100 px = 6 mi, so 1 unit = 0.3 mi.
@@ -43,6 +43,29 @@ describe("travel on the world map", () => {
     const text = routeText(sea, land);
     expect(text).toContain("Narkoc to Zugkatil: 42 mi by the shortest way (42 mi in a straight line).");
     expect(text).toContain("By land only (no boat): 60 mi: road 30 mi, trail 30 mi, through Midhollow.");
+  });
+
+  it("goes through the towns asked for, in order, and marks where each stands", () => {
+    const a = findTown(W, "Narkoc").town!;
+    const mid = findTown(W, "Midhollow").town!;
+    const b = findTown(W, "Zugkatil").town!;
+    const r = findJourney(W, [a, mid, b], S)!;
+    // Through Midhollow the sea lane is no use: road 30 mi, then trail 30 mi.
+    expect(Math.round(r.miles)).toBe(60);
+    expect(r.via).toEqual(["Midhollow"]);
+    expect(r.legs.map((l) => [l.kind, Math.round(l.miles), l.from, l.to])).toEqual([["road", 30, "Narkoc", "Midhollow"], ["trail", 30, "Midhollow", "Zugkatil"]]);
+    expect(r.towns).toEqual(["Midhollow"]);
+    expect(r.realms).toEqual(["March", "Vylnarg"]);
+    expect(r.stops).toEqual([{ name: "Narkoc", point: [0, 0] }, { name: "Midhollow", point: [500, 0] }, { name: "Zugkatil", point: [500, 500] }]);
+    // One point per step plus the start, with no repeat where the stretches meet.
+    expect(r.points.length).toBe(r.steps.length + 1);
+    expect(r.points).toEqual([[0, 0], [250, 0], [500, 0], [500, 250], [500, 500]]);
+    expect(routeText(r)).toContain("Narkoc to Zugkatil through Midhollow: 60 mi by the shortest way that passes there (42 mi in a straight line).");
+    // A repeat in a row is the same stop; one town alone is no journey.
+    expect(findJourney(W, [a, a, b], S)!.via).toBeUndefined();
+    expect(findJourney(W, [a, a], S)).toBeNull();
+    // Without stops it is the plain shortest way.
+    expect(Math.round(findJourney(W, [a, b], S)!.miles)).toBe(42);
   });
 
   it("walks a town off every route to the nearest point of the network", () => {

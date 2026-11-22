@@ -1,8 +1,9 @@
 /**
  * The "Georgios' Modules" toolbar group, as a canvas layer of its own so it can hold a drag tool:
  * "Map an area" draws a box on a city scene and builds a battle map of what is inside it. The
- * group also holds the Map Maker panel button; Georgios Scribbler adds its buttons to the same
- * group from its own getSceneControlButtons hook.
+ * group also holds the Map Maker panel button and "Route" (the way between towns, drawn on the
+ * world map); Georgios Scribbler adds its buttons to the same group from its own
+ * getSceneControlButtons hook.
  */
 
 import { MODULE_ID } from "./lib.js";
@@ -16,7 +17,7 @@ const GOLD = 0xe0a92e;
  * Registers the layer (call during init).
  * @param {{ openPanel: () => void, onArea: (scene: Scene, rect: {x: number, y: number, w: number, h: number}) => Promise<void>, t: (key: string) => string }} opts
  */
-export function registerAreaTool({ openPanel, onArea, t, openCompanions }) {
+export function registerAreaTool({ openPanel, onArea, t, openCompanions, openRoute }) {
   const InteractionLayer = foundry.canvas.layers.InteractionLayer;
 
   class GeorgiosLayer extends InteractionLayer {
@@ -44,6 +45,7 @@ export function registerAreaTool({ openPanel, onArea, t, openCompanions }) {
         tools: {
           georgiosArea: { name: "georgiosArea", order: 0, title: t("AreaTool"), icon: "fa-solid fa-vector-square", visible: true },
           georgiosMapMaker: { name: "georgiosMapMaker", order: 1, title: t("Open"), icon: "fa-solid fa-dungeon", button: true, visible: true, onChange: () => openPanel() },
+          georgiosRoute: { name: "georgiosRoute", order: 2, title: t("Route.Title"), icon: "fa-solid fa-route", button: true, visible: true, onChange: () => openRoute?.() },
           georgiosCompanions: { name: "georgiosCompanions", order: 9, title: t("Launcher.Title"), icon: "fa-solid fa-power-off", button: true, visible: true, onChange: () => openCompanions?.() },
         },
       };

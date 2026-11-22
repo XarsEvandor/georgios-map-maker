@@ -132,7 +132,12 @@ export class CompanionServer {
       }
       case "maps.route":
         // The way between two towns of a built world, in words and as a picture (for the GM's assistant).
-        return worldRoute(s.dataDir, String(p.world ?? ""), String(p.from ?? "").slice(0, 120), String(p.to ?? "").slice(0, 120), { image: p.image !== false });
+        return worldRoute(s.dataDir, String(p.world ?? ""), String(p.from ?? "").slice(0, 120), String(p.to ?? "").slice(0, 120), {
+          image: p.image !== false,
+          // Towns to pass through, in order; at most six.
+          via: Array.isArray(p.via) ? p.via.slice(0, 6).map((v: unknown) => String(v ?? "").slice(0, 120)) : [],
+          land: p.land === true,
+        });
       case "dd.open": {
         const file = s.mapFile(String(p.mapId), p.version);
         const version = s.version(String(p.mapId), p.version).id;

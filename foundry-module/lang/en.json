@@ -107,6 +107,22 @@
       "GpuFree": "Graphics card: free.",
       "Refresh": "Refresh",
       "Close": "Close"
+    },
+    "Route": {
+      "Title": "Route on the world map",
+      "From": "From",
+      "Via": "Through",
+      "ViaHint": "towns to pass, in order, split by commas (optional)",
+      "To": "To",
+      "Land": "By land only (no boat)",
+      "Reveal": "The players see it too",
+      "Draw": "Draw the way",
+      "Clear": "Clear the way",
+      "Cleared": "Map Maker: the way is gone from the world map.",
+      "NothingToClear": "Map Maker: no way is drawn on the world map.",
+      "NeedEnds": "Map Maker: name the town to start from and the town to reach.",
+      "DrawnShown": "Drawn on \"{scene}\", where the players see it too.",
+      "DrawnOn": "Drawn on \"{scene}\", hidden from the players. To show it to them, open the Drawings tools, right-click a piece of the way and click the eye."
     }
   }
 }

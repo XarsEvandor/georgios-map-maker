@@ -1,15 +1,16 @@
 /**
- * maps.route: the way between two towns of a built world, for the GM's assistant (Georgios Scribbler
- * asks for it through the Foundry module): the route in plain words, and a picture of the stretch of
+ * maps.route: the way between two towns of a built world, through other towns when asked, for the
+ * Foundry module (which draws it on the world map) and the GM's assistant (Georgios Scribbler asks
+ * for it through the module): the route in plain words, its points, and a picture of the stretch of
  * the world map it crosses with the way drawn on it (red: road solid, trail dashed; blue: sea; amber:
- * the way by land, when the shortest one takes a boat).
+ * the way by land, when the shortest one takes a boat; gold dots: the towns it was asked to pass).
  */
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
-import { findRoute, findTown, routeText, type LegKind, type Route, type RouteWorld, type Scale } from "@gmm/core";
+import { findJourney, findTown, routeText, type LegKind, type Route, type RouteWorld, type Scale } from "@gmm/core";
 
 const WORLD_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** The picture's longer side, in pixels (what a vision model reads in full). */
@@ -77,13 +78,14 @@ async function picture(w: Loaded, routes: Array<{ r: Route; land?: boolean }>): 
   const lines = routes.flatMap(({ r, land }) => r.steps.map((k, i) => `<polyline points="${at(r.points[i]!)} ${at(r.points[i + 1]!)}" fill="none" stroke-linecap="round" opacity="0.85" ${land ? 'stroke="#e08a00" stroke-width="5" stroke-dasharray="10 8"' : STYLE[k]}/>`));
   const main = routes[0]!.r;
   const dot = (p: [number, number], color: string) => `<circle cx="${at(p).split(",")[0]}" cy="${at(p).split(",")[1]}" r="11" fill="${color}" stroke="#fff" stroke-width="3"/>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${lines.join("")}${dot(main.points[0]!, "#1e8f3a")}${dot(main.points.at(-1)!, "#c0281e")}</svg>`;
+  const stops = main.stops.slice(1, -1).map((s) => dot(s.point, "#e0a92e")).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${lines.join("")}${stops}${dot(main.points[0]!, "#1e8f3a")}${dot(main.points.at(-1)!, "#c0281e")}</svg>`;
   const jpeg = await sharp(w.map).extract({ left, top, width, height }).resize(W, H).composite([{ input: Buffer.from(svg) }]).jpeg({ quality: 82 }).toBuffer();
   const per100 = (100 / f) * w.scale.milesPerPx;
   return {
     media_type: "image/jpeg",
     data: jpeg.toString("base64"),
-    caption: `The picture shows the stretch of the world map the way crosses: ${main.from} is the green dot, ${main.to} the red one. The way is drawn in red (solid: road, dashed: trail, dotted: open ground) and blue dashes (by sea)${routes.length > 1 ? "; the way by land only in amber dashes" : ""}. In this picture 100 pixels are about ${Math.round(per100)} miles.`,
+    caption: `The picture shows the stretch of the world map the way crosses: ${main.from} is the green dot, ${main.to} the red one${main.via?.length ? `, ${main.via.join(" and ")} ${main.via.length > 1 ? "are the" : "is the"} gold ${main.via.length > 1 ? "dots" : "dot"}` : ""}. The way is drawn in red (solid: road, dashed: trail, dotted: open ground) and blue dashes (by sea)${routes.length > 1 ? "; the way by land only in amber dashes" : ""}. In this picture 100 pixels are about ${Math.round(per100)} miles.`,
   };
 }
 
@@ -97,19 +99,24 @@ export interface RouteAnswer {
   unknown?: Array<{ name: string; suggestions: string[] }>;
 }
 
-export async function worldRoute(dataDir: string, world: string, from: string, to: string, o: { image?: boolean } = {}): Promise<RouteAnswer> {
+/**
+ * The way from one town to another, through `via` towns in order when asked; `land`: never by boat
+ * (then there is no second, by-land way to offer).
+ */
+export async function worldRoute(dataDir: string, world: string, from: string, to: string, o: { image?: boolean; via?: string[]; land?: boolean } = {}): Promise<RouteAnswer> {
   const w = await load(dataDir, world);
-  const a = findTown(w.aged, from);
-  const b = findTown(w.aged, to);
-  const unknown = [[from, a], [to, b]].filter(([, t]) => !(t as typeof a).town).map(([name, t]) => ({ name: name as string, suggestions: (t as typeof a).suggestions }));
+  const names = [from, ...(o.via ?? []).filter((v) => v.trim()), to];
+  const found = names.map((n) => findTown(w.aged, n));
+  const unknown = names.map((name, i) => ({ name, t: found[i]! })).filter((x) => !x.t.town).map((x) => ({ name: x.name, suggestions: x.t.suggestions }));
   if (unknown.length) return { found: false, unknown, text: unknown.map((u) => `No town called "${u.name}" on the map${u.suggestions.length ? `; the nearest names: ${u.suggestions.join(", ")}` : ""}.`).join("\n") };
-  const route = findRoute(w.aged, a.town!, b.town!, w.scale);
-  if (!route) return { found: false, text: `${a.town!.name} and ${b.town!.name} are the same town.` };
-  const land = route.byKind.sea ? findRoute(w.aged, a.town!, b.town!, w.scale, { land: true }) : null;
+  const towns = found.map((t) => t.town!);
+  const route = findJourney(w.aged, towns, w.scale, { land: !!o.land });
+  if (!route) return { found: false, text: `${towns[0]!.name} and ${towns.at(-1)!.name} are the same town.` };
+  const land = route.byKind.sea && !o.land ? findJourney(w.aged, towns, w.scale, { land: true }) : null;
   const pic = o.image === false ? undefined : await picture(w, [{ r: route }, ...(land ? [{ r: land, land: true }] : [])]);
   return {
     found: true, route, land,
-    text: `${routeText(route, land)}${pic ? `\n${pic.caption}` : ""}`,
+    text: `${routeText(route, land)}${o.land ? "\nBy land only, as asked: no boat." : ""}${pic ? `\n${pic.caption}` : ""}`,
     ...(pic ? { image: { media_type: pic.media_type, data: pic.data } } : {}),
   };
 }
